@@ -1,6 +1,6 @@
 # BN Smart Money Tracker
 
-把 Binance Futures「聰明錢」訊號 + 訂單簿 / 大單 / 鏈上持有人結構，每 15 分鐘抓一次、寫成 JSON、推到 GitHub Pages 上做純前端視覺化。
+把 Binance Futures「聰明錢」訊號 + 訂單簿 / 大單 / 鏈上持有人結構，每 15 分鐘抓一次、寫進 Cloudflare R2，前端純 static 從 Worker 讀。
 
 線上版：以這個 repo 的 GitHub Pages 部署為準。
 
@@ -8,26 +8,20 @@
 
 ## 目前追蹤的 Symbol
 
-| Symbol | CEX | 鏈上資料 | 前端顯示 |
-|---|---|---|---|
-| RIVER | ✅ | BSC | ✅ |
-| BTC | ✅ | — | ✅ |
-| ETH | ✅ | — | ✅ |
-| SOL | ✅ | — | ✅ |
-| SIREN | ✅ | BSC | 🙈 隱藏 |
-| LIT | ✅ | BSC | 🙈 隱藏 |
-| RAVE | ✅ | ETH | 🙈 隱藏 |
-| PIPPIN | ✅ | — | 🙈 隱藏 |
-| BEAT | ✅ | BSC | 🙈 隱藏 |
-| POWER | ✅ | BSC | 🙈 隱藏 |
+| Symbol | CEX | 鏈上資料 |
+|---|---|---|
+| RIVER/USDT | ✅ | BSC |
+| BTC/USDT | ✅ | — |
+| ETH/USDT | ✅ | — |
+| SOL/USDT | ✅ | — |
 
-> 「隱藏」= 資料還是會抓並寫進 `data/`，只是前端按鈕列不顯示。要解除請編 [index.html](index.html) 的 `HIDDEN_SYMBOLS`。
+要加減 symbol 見下方「新增 symbol」。
 
 ---
 
 ## 資料來源
 
-每個 symbol 每次收集會打以下幾個 API：
+每個 symbol 每 15 分鐘打以下 API：
 
 ### 1. Binance Smart Money（futures 衍生品專用）
 - `bapi/futures/v1/public/future/smart-money/signal/overview` — 聰明錢即時概況：總交易員 / 多空交易員 / 鯨魚數 / 多空持倉 USDT / 平均開倉價 / 獲利比例 / 多空比
@@ -45,13 +39,9 @@
 
 ### 3. Binance Web3 Wallet（鏈上代幣資訊）
 - `web3.binance.com/bapi/defi/v4/.../market/token/dynamic/info` — 持幣人數、Top 10 集中度、KOL 持有人、Smart Money 持有人、池子流動性
-- 只跑在有設定鏈上合約地址的 symbol（見 `ONCHAIN_CONFIG`）
+- 只跑在有設定鏈上合約地址的 symbol（目前只有 RIVER）
 
-### 4. OKX DEX（透過本機 `onchainos` CLI）
-- `onchainos token price-info <addr> --chain bsc` — 鏈上 5m / 1h / 4h 價格變化、交易筆數、量、24h 高低
-- 同樣只跑鏈上幣
-
-完整欄位清單 → [scripts/multi-collect.py](scripts/multi-collect.py)。
+完整欄位清單 → [smart-money-collector/src/index.ts](smart-money-collector/src/index.ts) 的 `row` 構造處。
 
 ---
 
@@ -59,32 +49,44 @@
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│  Server  (/root/.openclaw/workspace/)                          │
+│  Cloudflare Worker  (smart-money-collector)                    │
 │                                                                │
-│    cron: */15 * * * *                                          │
-│      └─ multi-collect.py --all   ──► data/<sym>/*.json         │
-│      └─ push-data.sh             ──► git commit + push         │
+│    cron trigger: */15 * * * *                                  │
+│      └─ scheduled handler                                      │
+│            ├─ fetch 3 binance hosts × 4 symbols                │
+│            └─ write to R2 bucket `smart-money-data`            │
 │                                                                │
+│    fetch handler (CORS-enabled JSON proxy)                     │
+│      GET /data/symbols.json                                    │
+│      GET /data/<short>/prev_row.json                           │
+│      GET /data/<short>/history_full.json                       │
+│      GET /run    (manual trigger)                              │
 └──────────────────────────────┬─────────────────────────────────┘
-                               │ git push (squash 每 20 commits)
+                               │ R2 binding
                                ▼
-                  ┌────────────────────────┐
-                  │  GitHub repo (main)    │
-                  │   data/<sym>/*.json    │
-                  │   data/symbols.json    │
-                  │   index.html           │
-                  └───────────┬────────────┘
-                              │ GitHub Pages
-                              ▼
-                  ┌────────────────────────┐
+                  ┌────────────────────────────┐
+                  │  R2 bucket: smart-money-   │
+                  │  data                      │
+                  │   <SYMBOL>/prev_row.json   │
+                  │   <SYMBOL>/history_full.   │
+                  │   json (≤3000 筆)          │
+                  │   symbols.json             │
+                  │   meta.json                │
+                  └────────────────────────────┘
+                               ▲
+                               │ fetch (CORS)
+                  ┌────────────┴───────────┐
                   │  Browser (static SPA)  │
+                  │  index.html            │
                   │  lightweight-charts    │
                   └────────────────────────┘
 ```
 
-- **無後端**：前端 `index.html` 直接 `fetch('data/<sym>/history_full.json')`，沒有 API server
+- **無後端 server / 無 GH Actions**：原本是 server cron + git push + GH Pages 讀 repo `data/`；現在改成 CF Worker cron + R2 物件儲存
 - **環形緩衝**：每個 `history_full.json` 最多 3000 筆 ≈ 31 天（15 分鐘間隔）
-- **Git 防膨脹**：[scripts/push-data.sh](scripts/push-data.sh) 超過 20 個 commit 就 orphan squash 後 force push
+- **CORS / cache**：Worker `/data/*` 路由附 `Access-Control-Allow-Origin: *` 和 `Cache-Control: public, max-age=30`
+
+線上 Worker URL：`https://smart-money-collector.andychien-design.workers.dev`
 
 ---
 
@@ -92,26 +94,23 @@
 
 ```
 .
-├── index.html                 # 前端（單檔，純 vanilla JS）
-├── data/
-│   ├── symbols.json           # 符號清單 + 最新價（push-data.sh 重生）
-│   └── <symbol>/
-│       ├── history_full.json  # 環形緩衝 ≤3000 筆
-│       └── prev_row.json      # 最近一筆
-├── scripts/
-│   ├── multi-collect.py       # 抓資料、寫 JSON
-│   ├── push-data.sh           # 複製 + commit + push
-│   └── startup.sh             # 容器開機自啟（設 cron + 首次收集）
-└── server/
-    ├── app.py                 # 備用 Flask 版（目前未啟用）
-    └── start.sh
+├── index.html                          # 前端（單檔，純 vanilla JS）
+├── smart-money-collector/              # Cloudflare Worker
+│   ├── src/index.ts                    # scheduled + fetch handler
+│   ├── wrangler.jsonc                  # cron + R2 binding 設定
+│   ├── package.json
+│   └── tsconfig.json
+├── data/                               # （舊）Python collector 留下的歷史 JSON
+└── server/                             # （舊）Flask 備用版，未啟用
 ```
+
+舊的 `scripts/` Python collector 跟 `.github/workflows/collect.yml` 已移除（被 Worker 取代）。`data/` 跟 `server/` 是舊架構遺物，可以保留當 archive。
 
 ---
 
 ## 本機開發
 
-前端是純 static，直接起個 static server：
+### 前端
 
 ```bash
 cd BN_Smart_Money_Tracker
@@ -119,39 +118,88 @@ python3 -m http.server 8000
 # 開 http://localhost:8000
 ```
 
-頁面會直接讀 repo 裡的 `data/*.json`，所以你看到的就是最近一次伺服器 push 的快照。
+`index.html` 用 `DATA_BASE` 指向線上 Worker，所以本機開頁面也能看到即時資料。
 
-> ⚠️ [scripts/multi-collect.py](scripts/multi-collect.py) 的 `BASE_DIR` 寫死 `/root/.openclaw/workspace/data`，只能在採集伺服器上跑。要在本機抓資料的話需先改路徑。
+### Worker
+
+```bash
+cd smart-money-collector
+npx wrangler login                # 首次
+npx wrangler dev --remote         # 跑在 CF edge，用真實 R2
+```
+
+dev server 起來後：
+- `curl http://localhost:8787/run` — 手動觸發一次完整收集
+- `curl "http://localhost:8787/__scheduled?cron=*/15+*+*+*+*"` — 模擬 cron 觸發
+
+⚠️ `wrangler dev --remote` 的 R2 binding 是**真實 bucket**（不是沙盒），會寫入 production 資料。
+
+### 直接查 R2
+
+```bash
+npx wrangler r2 object get smart-money-data/symbols.json --remote --pipe | jq
+npx wrangler r2 object get smart-money-data/RIVERUSDT/prev_row.json --remote --pipe | jq
+```
+
+⚠️ 一定要加 `--remote`，預設是 `--local`（會撈本機 miniflare sandbox，永遠 not found）。
+
+### Worker logs
+
+```bash
+cd smart-money-collector
+npx wrangler tail
+```
 
 ---
 
-## 隱藏 / 顯示某個 symbol
+## 部署
 
-編 [index.html](index.html)：
-
-```js
-const HIDDEN_SYMBOLS = new Set(['siren','lit','rave','pippin','beat','power']);
+```bash
+cd smart-money-collector
+npx wrangler deploy
 ```
 
-加減就好，資料採集不受影響。
+Deploy 後 cron 自動上線，下一個 `*/15` 整點就會跑。R2 bucket `smart-money-data` 需事先建好。
 
 ---
 
 ## 新增 symbol
 
-1. 在 [scripts/multi-collect.py](scripts/multi-collect.py) 的 `ALL_SYMBOLS` 加上 `XXXUSDT`
-2. 如果有鏈上資料，在 `ONCHAIN_CONFIG` 加 `bsc_addr` + `bsc_chain`
-3. 在 [scripts/push-data.sh](scripts/push-data.sh) 的 `SYMBOLS` 跟 inline python 的 list 都加上小寫名
-4. 等下次 cron 跑（或手動跑 `startup.sh`）
+編 [smart-money-collector/src/index.ts](smart-money-collector/src/index.ts) 的 `SYMBOLS_META`：
+
+```ts
+const SYMBOLS_META: SymbolMeta[] = [
+  { symbol: "RIVERUSDT", short: "river", label: "RIVER/USDT",
+    onchain: { chain: "56", addr: "0x..." } },
+  { symbol: "XXXUSDT",   short: "xxx",   label: "XXX/USDT" },  // 新增
+];
+```
+
+- `symbol`：Binance futures 上的代號（含 USDT）
+- `short`：URL 用的 lowercase id，前端 `currentSymbol` 用這個
+- `label`：UI 顯示
+- `onchain`（選用）：BSC chain id + 合約地址，沒設就跳過鏈上欄位
+
+加完 `npx wrangler deploy` 上線。前端會自動從 `/data/symbols.json` 拿到新清單，不需要動。
+
+---
+
+## 隱藏 / 顯示某個 symbol
+
+編 [index.html](index.html) 裡的 `HIDDEN_SYMBOLS`：
+
+```js
+const HIDDEN_SYMBOLS = new Set(['siren','lit']);  // 短名
+```
+
+資料採集不受影響。
 
 ---
 
 ## 狀態檢查
 
-最近一次採集時間：看 `data/<symbol>/prev_row.json` 的 `timestamp` 欄位（格式 `YYYY-MM-DD HH:MM`，時區 UTC+8）。
-
 ```bash
-python3 -c "import json; print(json.load(open('data/river/prev_row.json'))['timestamp'])"
+curl https://smart-money-collector.andychien-design.workers.dev/data/symbols.json | jq
 ```
 
-正常狀態下應該距現在不超過 15 分鐘。
+每筆 `last_ts` 距現在應該不超過 15 分鐘（UTC+8 字串格式 `YYYY-MM-DD HH:MM`）。
