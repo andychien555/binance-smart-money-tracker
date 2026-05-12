@@ -20,5 +20,8 @@
 			"binding": "DATA",
 			"bucket_name": "smart-money-data"
 		}
-	]
+	],
+	"assets": {
+		"directory": "./public/"
+	}
 }

@@ -73,7 +73,7 @@ let currentSymbol='river', symbolList=[];
 const urlParams=new URLSearchParams(window.location.search);
 if(urlParams.get('symbol')) currentSymbol=urlParams.get('symbol').toLowerCase();
 
-const DATA_BASE='https://smart-money-collector.andychien-design.workers.dev/data';
+const DATA_BASE='/data';
 const HIDDEN_SYMBOLS=new Set(['siren','lit','rave','pippin','beat','power']);
 async function fetchSymbols(){
   const list=await (await fetch(`${DATA_BASE}/symbols.json`)).json();
