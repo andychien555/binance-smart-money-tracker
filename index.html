@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Money Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root {
+    --bg: #0a0e17; --card: #111827; --border: #1f2937; --text: #e5e7eb;
+    --dim: #9ca3af; --green: #10b981; --red: #ef4444; --blue: #3b82f6;
+    --yellow: #f59e0b; --purple: #8b5cf6; --cyan: #06b6d4;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:14px; }
+  .symbol-bar { display:flex; gap:6px; padding:16px 24px 8px; flex-wrap:wrap; align-items:center; }
+  .sym-btn { background:var(--card); border:1px solid var(--border); color:var(--dim); padding:8px 16px; border-radius:8px; cursor:pointer; font-size:13px; font-weight:600; transition:all .15s; display:flex; flex-direction:column; align-items:center; min-width:80px; }
+  .sym-btn:hover { border-color:var(--blue); color:var(--text); }
+  .sym-btn.active { background:var(--blue); border-color:var(--blue); color:#fff; }
+  .sym-btn .sym-name { font-size:14px; font-weight:700; }
+  .sym-btn .sym-price { font-size:11px; margin-top:2px; opacity:0.8; }
+  .sym-btn .sym-chg { font-size:10px; }
+  .sym-btn.no-data { opacity:0.4; cursor:not-allowed; }
+  .header { padding:12px 24px 12px; display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; }
+  .header h1 { font-size:24px; font-weight:700; color:#fff; }
+  .header .price { font-size:28px; font-weight:700; }
+  .header .change { font-size:16px; font-weight:600; }
+  .header .meta { color:var(--dim); font-size:12px; }
+  .pos { color:var(--green); } .neg { color:var(--red); }
+  .stats-bar { display:flex; gap:8px; padding:0 24px 16px; flex-wrap:wrap; }
+  .stat-pill { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:8px 14px; font-size:12px; white-space:nowrap; }
+  .stat-pill .label { color:var(--dim); } .stat-pill .value { font-weight:600; margin-left:4px; }
+  .time-selector { display:flex; gap:4px; padding:0 24px 12px; }
+  .time-btn { background:var(--card); border:1px solid var(--border); color:var(--dim); padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px; transition:all .15s; }
+  .time-btn:hover { border-color:var(--blue); color:var(--text); }
+  .time-btn.active { background:var(--blue); border-color:var(--blue); color:#fff; }
+  .charts-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:0 24px 24px; }
+  @media(max-width:900px){ .charts-grid{grid-template-columns:1fr;} }
+  .chart-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; min-height:300px; position:relative; }
+  .chart-card.full { grid-column:1/-1; }
+  .chart-card h3 { font-size:13px; color:var(--dim); margin-bottom:8px; font-weight:500; }
+  .chart-container { width:100%; height:260px; } .chart-container.tall { height:340px; }
+  .tt {
+    position:absolute; z-index:100; top:36px; left:16px;
+    background:rgba(17,24,39,0.92); border:1px solid var(--border);
+    border-radius:8px; padding:8px 10px; font-size:11px;
+    pointer-events:none; backdrop-filter:blur(8px);
+    min-width:160px; line-height:1.6; display:none;
+  }
+  .tt .tt-time { color:var(--dim); font-size:10px; margin-bottom:3px; }
+  .tt .tt-row { display:flex; justify-content:space-between; gap:10px; }
+  .tt .tt-l { color:var(--dim); } .tt .tt-v { font-weight:600; }
+  .loading { display:flex; align-items:center; justify-content:center; height:100vh; font-size:16px; color:var(--dim); }
+  .refresh-bar { padding:0 24px 8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .refresh-bar .dot { width:6px; height:6px; border-radius:50%; animation:pulse 2s infinite; }
+  .refresh-bar .dot.ok { background:var(--green); }
+  .refresh-bar .dot.warn { background:var(--yellow); }
+  .refresh-bar .dot.stale { background:var(--red); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .refresh-bar span { color:var(--dim); font-size:11px; }
+  .refresh-bar .ago { font-weight:600; }
+  .refresh-bar .ago.warn { color:var(--yellow); }
+  .refresh-bar .ago.stale { color:var(--red); }
+</style>
+</head>
+<body>
+<div id="app"><div class="loading">Loading...</div></div>
+<script>
+let allData=[], chartReg={}, currentHours=24, syncing=false, timeIdx={};
+let currentSymbol='river', symbolList=[];
+
+// Get symbol from URL or default
+const urlParams=new URLSearchParams(window.location.search);
+if(urlParams.get('symbol')) currentSymbol=urlParams.get('symbol').toLowerCase();
+
+async function fetchSymbols(){ return (await fetch('data/symbols.json')).json(); }
+async function fetchData(h){
+  const all=(await fetch(`data/${currentSymbol}/history_full.json`)).json().then(d=>d||[]);
+  const data=await all;
+  if(h>=9999||!h) return data;
+  const cutoff=Date.now()-(h*3600*1000);
+  return data.filter(d=>new Date(d.timestamp.replace(' ','T')+':00+08:00').getTime()>=cutoff);
+}
+
+function fmt(v,d=2){ if(v==null||v==='')return'—'; const n=Number(v); return isNaN(n)?v:n.toFixed(d); }
+function timeAgo(tsStr){
+  // tsStr like "2026-04-01 16:51" in UTC+8
+  const d=new Date(tsStr.replace(' ','T')+':00+08:00');
+  const now=Date.now();
+  const diff=Math.max(0,Math.floor((now-d.getTime())/1000));
+  if(diff<60) return {text:'剛剛',level:'ok'};
+  if(diff<3600) return {text:`${Math.floor(diff/60)}分鐘前`,level:diff>1200?'warn':'ok'};
+  if(diff<86400) return {text:`${Math.floor(diff/3600)}小時${Math.floor((diff%3600)/60)}分前`,level:'stale'};
+  return {text:`${Math.floor(diff/86400)}天前`,level:'stale'};
+}
+function fmtPrice(v){
+  const n=Number(v); if(isNaN(n)) return '—';
+  if(n>=1000) return n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  if(n>=1) return n.toFixed(3);
+  if(n>=0.01) return n.toFixed(4);
+  return n.toFixed(6);
+}
+function parseTime(ts){ return Math.floor(new Date(ts.replace(' ','T')+':00+08:00').getTime()/1000); }
+function buildTimeIndex(data){ timeIdx={}; data.forEach((d,i)=>{ timeIdx[parseTime(d.timestamp)]=i; }); }
+function dedup(arr){ const seen={}; return arr.filter(d=>{ if(isNaN(d.time)||seen[d.time]) return false; seen[d.time]=1; return true; }); }
+
+function renderSymbolBar(){
+  return `<div class="symbol-bar">${symbolList.map(s=>{
+    const active=s.symbol===currentSymbol?'active':'';
+    const nodata=!s.has_data?'no-data':'';
+    const priceTxt=s.price?`$${fmtPrice(s.price)}`:'';
+    const chg=s.change_pct!=null?s.change_pct:0;
+    const chgCls=chg>=0?'pos':'neg';
+    const chgTxt=s.has_data?`<span class="sym-chg ${chgCls}">${chg>=0?'+':''}${Number(chg).toFixed(2)}%</span>`:'<span class="sym-chg">no data</span>';
+    return `<button class="sym-btn ${active} ${nodata}" onclick="switchSymbol('${s.symbol}')" ${!s.has_data?'disabled':''}>
+      <span class="sym-name">${s.symbol.toUpperCase()}</span>
+      <span class="sym-price">${priceTxt}</span>
+      ${chgTxt}
+    </button>`;
+  }).join('')}</div>`;
+}
+
+function renderHeader(d){
+  const name=currentSymbol.toUpperCase();
+  const p=Number(d.price),pct=Number(d.price_change_pct),cls=pct>=0?'pos':'neg';
+  return `<div class="header"><h1>${name}/USDT</h1><span class="price ${cls}">$${fmtPrice(p)}</span><span class="change ${cls}">${pct>=0?'▲':'▼'} ${Math.abs(pct).toFixed(2)}%</span><span class="meta">${d.timestamp} UTC+8 · 15min</span></div>`;
+}
+function renderStats(d){
+  const pills=[
+    {l:'OI($)',v:`$${fmt(d.oi_usdt)}M`},{l:'OI(Coin)',v:`${fmt(d.oi_coin,0)}`},{l:'Funding',v:`${fmt(d.funding_rate,4)}%`},
+    {l:'Vol 24h',v:`$${fmt(d.volume_24h)}M`},
+    {l:'SM L/S',v:fmt(d.sm_ls_ratio,4),c:Number(d.sm_ls_ratio)>1?'pos':'neg'},
+    {l:'大戶 L/S',v:fmt(d.top_pos_ls_ratio,4),c:Number(d.top_pos_ls_ratio)>1?'pos':'neg'},
+    {l:'全網 L/S',v:fmt(d.global_ls_ratio,4)},
+    {l:'Taker B/S',v:fmt(d.taker_buy_sell_ratio,4)},
+  ];
+  if(d.onchain_holders) pills.push({l:'Holders',v:Number(d.onchain_holders).toLocaleString()});
+  if(d.btc_price && currentSymbol!=='btc') pills.push({l:'BTC',v:`$${Number(d.btc_price).toLocaleString()}`});
+  if(d.river_vs_btc!=null) pills.push({l:'vs BTC',v:`${Number(d.river_vs_btc)>=0?'+':''}${fmt(d.river_vs_btc,1)}%`,c:Number(d.river_vs_btc)>0?'pos':'neg'});
+  return `<div class="stats-bar">${pills.map(x=>`<div class="stat-pill"><span class="label">${x.l}</span><span class="value ${x.c||''}">${x.v}</span></div>`).join('')}</div>`;
+}
+function renderTimeSelector(){
+  const o=[{h:6,l:'6H'},{h:12,l:'12H'},{h:24,l:'1D'},{h:72,l:'3D'},{h:168,l:'7D'},{h:720,l:'30D'},{h:9999,l:'ALL'}];
+  return `<div class="time-selector">${o.map(x=>`<button class="time-btn ${x.h===currentHours?'active':''}" onclick="switchTime(${x.h})">${x.l}</button>`).join('')}</div>`;
+}
+
+function createChart(id, opts={}){
+  const el=document.getElementById(id); if(!el) return null;
+  const c=LightweightCharts.createChart(el,{
+    width:el.clientWidth, height:opts.height||260,
+    layout:{background:{type:'solid',color:'transparent'},textColor:'#9ca3af',fontSize:11},
+    grid:{vertLines:{color:'rgba(255,255,255,0.04)'},horzLines:{color:'rgba(255,255,255,0.04)'}},
+    crosshair:{mode:LightweightCharts.CrosshairMode.Normal,vertLine:{labelVisible:true},horzLine:{labelVisible:true}},
+    rightPriceScale:{borderColor:'#1f2937'},
+    timeScale:{borderColor:'#1f2937',timeVisible:true,secondsVisible:false},...opts,
+  });
+  new ResizeObserver(e=>{c.applyOptions({width:e[0].contentRect.width});}).observe(el);
+  return c;
+}
+
+function ttHtml(d, fields){
+  let h=`<div class="tt-time">${d.timestamp}</div>`;
+  for(const f of fields){
+    const v=d[f.key]; if(v==null) continue;
+    const s=f.color?` style="color:${f.color}"`:'';
+    h+=`<div class="tt-row"><span class="tt-l">${f.label}</span><span class="tt-v"${s}>${f.fmt?f.fmt(v):fmt(v)}</span></div>`;
+  }
+  return h;
+}
+
+function showTooltip(id, time){
+  const info=chartReg[id]; if(!info) return;
+  const tt=info.tooltipEl;
+  if(!time){ tt.style.display='none'; return; }
+  const idx=timeIdx[time];
+  if(idx==null){ tt.style.display='none'; return; }
+  tt.innerHTML=ttHtml(allData[idx], info.fields);
+  tt.style.display='block';
+}
+
+function syncAll(sourceId, time){
+  if(syncing) return;
+  syncing=true;
+  for(const [id,info] of Object.entries(chartReg)){
+    if(id!==sourceId){
+      if(time){
+        const seriesData=info.seriesDataMap&&info.seriesDataMap[time];
+        const price=seriesData!=null?seriesData:0;
+        info.chart.setCrosshairPosition(price, time, info.firstSeries);
+      } else {
+        info.chart.clearCrosshairPosition();
+      }
+    }
+    showTooltip(id, time);
+  }
+  syncing=false;
+}
+
+function reg(id, chart, containerId, fields, firstSeries, firstSeriesData){
+  const card=document.getElementById(containerId).closest('.chart-card');
+  const tt=document.createElement('div');
+  tt.className='tt';
+  card.appendChild(tt);
+  const seriesDataMap={};
+  if(firstSeriesData) firstSeriesData.forEach(d=>{ seriesDataMap[d.time]=d.value; });
+  chartReg[id]={chart, tooltipEl:tt, fields, firstSeries, seriesDataMap};
+  chart.subscribeCrosshairMove(p=>{ if(!syncing) syncAll(id, p.time||null); });
+}
+
+function renderCharts(data){
+  Object.values(chartReg).forEach(c=>{try{c.chart.remove();}catch(e){}});
+  chartReg={};
+  if(!data.length) return;
+  const S=k=>{const seen={}; return data.map(d=>({time:parseTime(d.timestamp),value:Number(d[k])||0})).filter(d=>{if(isNaN(d.time)||seen[d.time]) return false; seen[d.time]=1; return true;});};
+
+  // 1 Price+OI
+  const c1=createChart('chart-price',{height:340});
+  if(c1){
+    const sd1=S('price');
+    const s=c1.addAreaSeries({lineColor:'#10b981',topColor:'rgba(16,185,129,0.25)',bottomColor:'rgba(16,185,129,0.02)',lineWidth:2,priceScaleId:'left'});
+    s.setData(sd1);
+    c1.addLineSeries({color:'#f59e0b',lineWidth:1.5,lineStyle:2,priceScaleId:'right'}).setData(S('oi_usdt'));
+    c1.addLineSeries({color:'#a78bfa',lineWidth:1.5,lineStyle:0,priceScaleId:'oi_coin',visible:true}).setData(S('oi_coin'));
+    c1.applyOptions({leftPriceScale:{visible:true,borderColor:'#1f2937'},rightPriceScale:{visible:true,borderColor:'#1f2937'}});
+    c1.timeScale().fitContent();
+    reg('price',c1,'chart-price',[
+      {key:'price',label:'Price',fmt:v=>`$${fmtPrice(v)}`,color:'#10b981'},
+      {key:'oi_usdt',label:'OI($)',fmt:v=>`$${fmt(v)}M`,color:'#f59e0b'},
+      {key:'oi_coin',label:'OI(Coin)',fmt:v=>`${fmt(v,0)}`,color:'#a78bfa'},
+      {key:'volume_24h',label:'Vol 24h',fmt:v=>`$${fmt(v)}M`},
+      {key:'funding_rate',label:'Funding',fmt:v=>`${fmt(v,4)}%`},
+      {key:'price_change_pct',label:'24h Chg',fmt:v=>`${Number(v)>=0?'+':''}${fmt(v,2)}%`},
+    ],s,sd1);
+  }
+
+  // 2 L/S Ratios
+  const c2=createChart('chart-ls');
+  if(c2){
+    const sd2=S('sm_ls_ratio');
+    const s=c2.addLineSeries({color:'#3b82f6',lineWidth:2}); s.setData(sd2);
+    c2.addLineSeries({color:'#f59e0b',lineWidth:1.5,lineStyle:2}).setData(S('top_pos_ls_ratio'));
+    c2.addLineSeries({color:'#8b5cf6',lineWidth:1,lineStyle:2}).setData(S('global_ls_ratio'));
+    c2.timeScale().fitContent();
+    reg('ls',c2,'chart-ls',[
+      {key:'sm_ls_ratio',label:'SM L/S',fmt:v=>fmt(v,4),color:'#3b82f6'},
+      {key:'top_pos_ls_ratio',label:'Top L/S',fmt:v=>fmt(v,4),color:'#f59e0b'},
+      {key:'global_ls_ratio',label:'Global L/S',fmt:v=>fmt(v,4),color:'#8b5cf6'},
+      {key:'sm_long_traders',label:'Long人數'},
+      {key:'sm_short_traders',label:'Short人數'},
+    ],s,sd2);
+  }
+
+  // 3 SM Positions
+  const c3=createChart('chart-positions');
+  if(c3){
+    const sd3=S('sm_long_pos_usdt');
+    const sd3short=(()=>{const seen={};return data.map(d=>({time:parseTime(d.timestamp),value:-(Number(d.sm_short_pos_usdt)||0)})).filter(d=>{if(isNaN(d.time)||seen[d.time])return false;seen[d.time]=1;return true;});})();
+    const s=c3.addBaselineSeries({topLineColor:'#10b981',topFillColor1:'rgba(16,185,129,0.45)',topFillColor2:'rgba(16,185,129,0.45)',bottomLineColor:'transparent',bottomFillColor1:'transparent',bottomFillColor2:'transparent',baseValue:{type:'price',price:0},lineWidth:1.5,priceScaleId:'left'});
+    s.setData(sd3);
+    c3.addBaselineSeries({topLineColor:'transparent',topFillColor1:'transparent',topFillColor2:'transparent',bottomLineColor:'#ef4444',bottomFillColor1:'rgba(239,68,68,0.45)',bottomFillColor2:'rgba(239,68,68,0.45)',baseValue:{type:'price',price:0},lineWidth:1.5,priceScaleId:'left'}).setData(sd3short);
+    c3.addLineSeries({color:'rgba(255,255,255,0.8)',lineWidth:1.5,lineStyle:2,priceScaleId:'right'}).setData(S('sm_ls_ratio'));
+    c3.applyOptions({leftPriceScale:{visible:true,borderColor:'#1f2937'}});
+    c3.timeScale().fitContent();
+    reg('positions',c3,'chart-positions',[
+      {key:'sm_long_pos_usdt',label:'Long持倉',fmt:v=>`$${fmt(v)}M`,color:'#10b981'},
+      {key:'sm_short_pos_usdt',label:'Short持倉',fmt:v=>`-$${fmt(v)}M`,color:'#ef4444'},
+      {key:'sm_ls_ratio',label:'SM L/S',fmt:v=>fmt(v,4),color:'#fff'},
+      {key:'sm_long_avg_price',label:'Long均價',fmt:v=>`$${fmtPrice(v)}`},
+      {key:'sm_short_avg_price',label:'Short均價',fmt:v=>`$${fmtPrice(v)}`},
+    ],s,sd3);
+  }
+
+  // 4 Whales
+  const c4=createChart('chart-whales');
+  if(c4){
+    const sd4=dedup(data.map(d=>({time:parseTime(d.timestamp),value:Number(d.sm_long_whales)||0,color:'#10b981'})));
+    const s=c4.addHistogramSeries({color:'#10b981',priceScaleId:'left'});
+    s.setData(sd4);
+    c4.addHistogramSeries({color:'#ef4444',priceScaleId:'left'}).setData(dedup(data.map(d=>({time:parseTime(d.timestamp),value:-(Number(d.sm_short_whales)||0),color:'#ef4444'}))));
+    c4.applyOptions({leftPriceScale:{visible:true,borderColor:'#1f2937'}});
+    c4.timeScale().fitContent();
+    reg('whales',c4,'chart-whales',[
+      {key:'sm_long_whales',label:'Long 🐋',color:'#10b981'},
+      {key:'sm_short_whales',label:'Short 🐋',color:'#ef4444'},
+      {key:'sm30_long_whales',label:'30m Long鯨'},
+      {key:'sm30_short_whales',label:'30m Short鯨'},
+      {key:'sm30_long_pos_usdt',label:'30m Long',fmt:v=>`$${fmt(v,1)}K`},
+      {key:'sm30_short_pos_usdt',label:'30m Short',fmt:v=>`$${fmt(v,1)}K`},
+    ],s,sd4);
+  }
+
+  // 5 Profit
+  const c5=createChart('chart-profit');
+  if(c5){
+    const sd5=S('sm_long_profit_pct');
+    const s=c5.addLineSeries({color:'#10b981',lineWidth:2}); s.setData(sd5);
+    c5.addLineSeries({color:'#ef4444',lineWidth:2}).setData(S('sm_short_profit_pct'));
+    c5.timeScale().fitContent();
+    reg('profit',c5,'chart-profit',[
+      {key:'sm_long_profit_pct',label:'Long盈利',fmt:v=>`${fmt(v,1)}%`,color:'#10b981'},
+      {key:'sm_short_profit_pct',label:'Short盈利',fmt:v=>`${fmt(v,1)}%`,color:'#ef4444'},
+    ],s,sd5);
+  }
+
+  // 6 Funding
+  const c6=createChart('chart-funding');
+  if(c6){
+    const sd6=dedup(data.map(d=>{const v=Number(d.funding_rate)||0;return{time:parseTime(d.timestamp),value:v,color:v>=0?'rgba(239,68,68,0.7)':'rgba(16,185,129,0.7)'};}));
+    const s=c6.addHistogramSeries({priceScaleId:'left'});
+    s.setData(sd6);
+    c6.applyOptions({leftPriceScale:{visible:true,borderColor:'#1f2937'}});
+    c6.timeScale().fitContent();
+    reg('funding',c6,'chart-funding',[
+      {key:'funding_rate',label:'Funding',fmt:v=>`${fmt(v,4)}%`},
+      {key:'taker_buy_sell_ratio',label:'Taker B/S',fmt:v=>fmt(v,4)},
+      {key:'taker_buy_vol',label:'主動買',fmt:v=>`$${fmt(v)}M`,color:'#10b981'},
+      {key:'taker_sell_vol',label:'主動賣',fmt:v=>`$${fmt(v)}M`,color:'#ef4444'},
+    ],s,sd6);
+  }
+
+  // 7 Depth
+  const c7=createChart('chart-depth');
+  if(c7){
+    const sd7=dedup(data.filter(d=>d.depth_bid_total_k).map(d=>({time:parseTime(d.timestamp),value:Number(d.depth_bid_total_k)||0})));
+    const s=c7.addLineSeries({color:'#10b981',lineWidth:1.5});
+    s.setData(sd7);
+    c7.addLineSeries({color:'#ef4444',lineWidth:1.5}).setData(dedup(data.filter(d=>d.depth_ask_total_k).map(d=>({time:parseTime(d.timestamp),value:Number(d.depth_ask_total_k)||0}))));
+    c7.timeScale().fitContent();
+    reg('depth',c7,'chart-depth',[
+      {key:'depth_bid_total_k',label:'Bid',fmt:v=>`$${fmt(v,0)}K`,color:'#10b981'},
+      {key:'depth_ask_total_k',label:'Ask',fmt:v=>`$${fmt(v,0)}K`,color:'#ef4444'},
+      {key:'depth_ratio',label:'Bid/Ask',fmt:v=>`${fmt(v)}x`},
+      {key:'depth_bid_wall_price',label:'Bid牆',fmt:v=>`$${fmtPrice(v)}`},
+      {key:'depth_ask_wall_price',label:'Ask牆',fmt:v=>`$${fmtPrice(v)}`},
+    ],s,sd7);
+  }
+
+  // 8 On-chain (only show if data exists)
+  const hasOnchain=data.some(d=>d.onchain_holders);
+  const onchainCard=document.getElementById('chart-onchain');
+  if(onchainCard){
+    if(!hasOnchain){ onchainCard.closest('.chart-card').style.display='none'; }
+    else {
+      onchainCard.closest('.chart-card').style.display='';
+      const c8=createChart('chart-onchain');
+      if(c8){
+        const hd=dedup(data.filter(d=>d.onchain_holders).map(d=>({time:parseTime(d.timestamp),value:Number(d.onchain_holders)||0})));
+        const s=c8.addAreaSeries({lineColor:'#06b6d4',topColor:'rgba(6,182,212,0.25)',bottomColor:'rgba(6,182,212,0.02)',lineWidth:2});
+        if(hd.length>1) s.setData(hd);
+        c8.timeScale().fitContent();
+        reg('onchain',c8,'chart-onchain',[
+          {key:'onchain_holders',label:'Holders',fmt:v=>Number(v).toLocaleString(),color:'#06b6d4'},
+          {key:'onchain_top10_pct',label:'Top10',fmt:v=>`${fmt(v)}%`},
+          {key:'onchain_sm_holders',label:'SM Holders'},
+          {key:'onchain_liquidity',label:'流動池',fmt:v=>`$${fmt(v)}M`},
+        ],s,hd);
+      }
+    }
+  }
+}
+
+function renderPage(data){
+  if(!data.length){document.getElementById('app').innerHTML=renderSymbolBar()+'<div class="loading" style="height:50vh">No data for '+currentSymbol.toUpperCase()+'</div>';return;}
+  const latest=data[data.length-1];
+  const ago=timeAgo(latest.timestamp);
+  document.getElementById('app').innerHTML=`
+    ${renderSymbolBar()}
+    ${renderHeader(latest)}${renderStats(latest)}
+    <div class="refresh-bar"><div class="dot ${ago.level}"></div><span>最近數據：<span class="ago ${ago.level}">${ago.text}</span> (${latest.timestamp} UTC+8) · ${data.length} pts · 數據每5分鐘收集 · 頁面每5分鐘刷新</span></div>
+    ${renderTimeSelector()}
+    <div class="charts-grid">
+      <div class="chart-card full"><h3>💰 Price & Open Interest</h3><div id="chart-price" class="chart-container tall"></div></div>
+      <div class="chart-card"><h3>📊 Long/Short Ratios</h3><div id="chart-ls" class="chart-container"></div></div>
+      <div class="chart-card"><h3>🐋 Smart Money Positions (M USDT)</h3><div id="chart-positions" class="chart-container"></div></div>
+      <div class="chart-card"><h3>🐋 Whale Count</h3><div id="chart-whales" class="chart-container"></div></div>
+      <div class="chart-card"><h3>💵 Profit Rate</h3><div id="chart-profit" class="chart-container"></div></div>
+      <div class="chart-card"><h3>📈 Funding Rate</h3><div id="chart-funding" class="chart-container"></div></div>
+      <div class="chart-card"><h3>📋 Order Book Depth (K USDT)</h3><div id="chart-depth" class="chart-container"></div></div>
+      <div class="chart-card"><h3>🔗 On-chain Holders</h3><div id="chart-onchain" class="chart-container"></div></div>
+    </div>`;
+  buildTimeIndex(data);
+  renderCharts(data);
+}
+
+async function switchSymbol(sym){
+  currentSymbol=sym;
+  // Update URL without reload
+  const url=new URL(window.location);
+  url.searchParams.set('symbol',sym);
+  window.history.replaceState({},'',url);
+  document.title=sym.toUpperCase()+'/USDT Dashboard';
+  allData=await fetchData(currentHours);
+  renderPage(allData);
+}
+
+async function switchTime(h){
+  currentHours=h;
+  allData=await fetchData(h);
+  renderPage(allData);
+}
+
+let refreshTimer=null, agoTimer=null;
+function updateAgoDisplay(){
+  if(!allData.length) return;
+  const latest=allData[allData.length-1];
+  const ago=timeAgo(latest.timestamp);
+  const dotEl=document.querySelector('.refresh-bar .dot');
+  const agoEl=document.querySelector('.refresh-bar .ago');
+  if(dotEl){ dotEl.className='dot '+ago.level; }
+  if(agoEl){ agoEl.className='ago '+ago.level; agoEl.textContent=ago.text; }
+}
+(async()=>{
+  try{
+    symbolList=await fetchSymbols();
+    // If current symbol has no data, pick first with data
+    const cur=symbolList.find(s=>s.symbol===currentSymbol);
+    if(!cur||!cur.has_data){
+      const first=symbolList.find(s=>s.has_data);
+      if(first) currentSymbol=first.symbol;
+    }
+    document.title=currentSymbol.toUpperCase()+'/USDT Dashboard';
+    allData=await fetchData(currentHours);
+    renderPage(allData);
+    // Refresh data + symbol prices every 5min
+    refreshTimer=setInterval(async()=>{
+      symbolList=await fetchSymbols();
+      allData=await fetchData(currentHours);
+      renderPage(allData);
+    },5*60*1000);
+    // Update "ago" text every 30s
+    agoTimer=setInterval(updateAgoDisplay, 30*1000);
+  }catch(e){document.getElementById('app').innerHTML=`<div class="loading">Error: ${e.message}</div>`;}
+})();
+</script>
+</body>
+</html>
