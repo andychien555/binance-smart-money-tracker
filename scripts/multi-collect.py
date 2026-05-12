@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.request import Request, urlopen
 from pathlib import Path
 
-BASE_DIR = Path("/root/.openclaw/workspace/data")
+BASE_DIR = Path(__file__).resolve().parent.parent / "data"
 TZ8 = timezone(timedelta(hours=8))
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/142.0.0.0 Safari/537.36"
 

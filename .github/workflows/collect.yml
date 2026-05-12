@@ -1,0 +1,92 @@
+name: collect-data
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub Actions cron is best-effort — actual fire time
+    # may drift 1-15 min depending on runner load.
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}
+
+# Allow the workflow to push commits back to the repo using GITHUB_TOKEN.
+permissions:
+  contents: write
+
+# Prevent overlapping runs (a slow run + a scheduled run at the same time).
+concurrency:
+  group: collect-data
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # We may need to force-push (orphan squash) when history gets large.
+          # Fetch full history so the rev-list count is accurate.
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Collect data for all symbols
+        run: |
+          python3 scripts/multi-collect.py --all
+
+      - name: Regenerate symbols.json
+        run: |
+          python3 <<'PY'
+          import json, os
+          symbols = ['river','btc','eth','sol','siren','lit','rave','pippin','beat','power']
+          result = []
+          for sym in symbols:
+              info = {'symbol': sym, 'label': sym.upper()+'/USDT'}
+              pf = f'data/{sym}/prev_row.json'
+              if os.path.exists(pf):
+                  with open(pf) as f:
+                      d = json.load(f)
+                      info['price'] = d.get('price')
+                      info['change_pct'] = d.get('price_change_pct')
+                      info['has_data'] = True
+              else:
+                  info['has_data'] = False
+              result.append(info)
+          with open('data/symbols.json','w') as f:
+              json.dump(result, f)
+          PY
+
+      - name: Commit + push (with periodic orphan-squash)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No data changes."
+            exit 0
+          fi
+
+          STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          git commit -m "data update ${STAMP}" --quiet
+
+          COUNT=$(git rev-list --count HEAD)
+          echo "Commit count: $COUNT"
+
+          if [ "$COUNT" -gt 200 ]; then
+            echo "History over 200 commits — squashing into a single orphan commit."
+            git checkout --orphan temp_branch
+            git add -A
+            git commit -m "data update ${STAMP} (squashed)" --quiet
+            git branch -D main
+            git branch -m main
+            git push --force origin main
+          else
+            git push origin main
+          fi
