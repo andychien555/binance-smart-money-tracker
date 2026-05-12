@@ -1,6 +1,6 @@
 #!/bin/bash
 # Push latest data to GitHub Pages
-REPO_DIR=/tmp/BN_Smart_Money_Tracker
+REPO_DIR=/tmp/binance-smart-money-tracker
 DATA_SRC=/root/.openclaw/workspace/data
 SYMBOLS="river btc eth sol siren lit rave pippin beat power"
 

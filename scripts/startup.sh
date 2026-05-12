@@ -5,12 +5,12 @@
 echo "[$(date -u)] Starting Smart Money infrastructure..."
 
 # 0. Restore git config + credentials
-git config --global user.name 'StevenHung0318'
-git config --global user.email 'steven@openclaw.dev'
+git config --global user.name 'andychien555'
+git config --global user.email 'andychien555@users.noreply.github.com'
 git config --global credential.helper store
-echo 'https://StevenHung0318:YOUR_GITHUB_TOKEN_HERE@github.com' > ~/.git-credentials
-if [ ! -d /tmp/BN_Smart_Money_Tracker ]; then
-  cd /tmp && git clone https://github.com/StevenHung0318/BN_Smart_Money_Tracker.git
+echo 'https://andychien555:YOUR_GITHUB_TOKEN_HERE@github.com' > ~/.git-credentials
+if [ ! -d /tmp/binance-smart-money-tracker ]; then
+  cd /tmp && git clone https://github.com/andychien555/binance-smart-money-tracker.git
 fi
 echo "[$(date -u)] Git repo ready"
 
