@@ -38,10 +38,26 @@
   @media(max-width:900px){ .charts-grid{grid-template-columns:1fr;} }
   .chart-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; min-height:300px; position:relative; }
   .chart-card.full { grid-column:1/-1; }
-  .chart-card h3 { font-size:13px; color:var(--dim); margin-bottom:8px; font-weight:500; }
+  .chart-card h3 { font-size:13px; color:var(--dim); margin-bottom:4px; font-weight:500; }
+  .chart-card .desc { font-size:11px; color:var(--dim); opacity:0.65; margin-bottom:8px; line-height:1.5; }
+  .chart-card .desc code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10.5px; background:rgba(255,255,255,0.04); padding:1px 4px; border-radius:3px; }
+  .info-section { margin:0 24px 32px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px 24px; }
+  .info-section h2 { font-size:16px; color:var(--text); margin-bottom:4px; font-weight:600; }
+  .info-section .info-sub { font-size:12px; color:var(--dim); margin-bottom:16px; }
+  .info-section h3 { font-size:14px; color:var(--text); margin:18px 0 8px; font-weight:600; }
+  .info-section h3:first-of-type { margin-top:8px; }
+  .info-section p, .info-section li { font-size:12.5px; color:var(--dim); line-height:1.7; }
+  .info-section ul { padding-left:20px; }
+  .info-section table { width:100%; border-collapse:collapse; margin:4px 0 8px; font-size:12px; }
+  .info-section th, .info-section td { text-align:left; padding:8px 10px; border:1px solid var(--border); vertical-align:top; }
+  .info-section th { background:rgba(255,255,255,0.03); color:var(--text); font-weight:600; }
+  .info-section td { color:var(--dim); }
+  .info-section code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; background:rgba(255,255,255,0.04); padding:1px 5px; border-radius:3px; color:var(--text); }
+  .info-section b { color:var(--text); font-weight:600; }
+  .info-section .warn { background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.3); border-radius:8px; padding:10px 14px; margin-top:12px; color:#fbbf24; font-size:12px; line-height:1.6; }
   .chart-container { width:100%; height:260px; } .chart-container.tall { height:340px; }
   .tt {
-    position:absolute; z-index:100; top:36px; left:16px;
+    position:absolute; z-index:100; top:60px; left:16px;
     background:rgba(17,24,39,0.92); border:1px solid var(--border);
     border-radius:8px; padding:8px 10px; font-size:11px;
     pointer-events:none; backdrop-filter:blur(8px);
@@ -66,7 +82,7 @@
 <body>
 <div id="app"><div class="loading">Loading...</div></div>
 <script>
-let allData=[], chartReg={}, currentHours=24, syncing=false, timeIdx={};
+let allData=[], chartReg={}, currentHours=24, syncing=false, rangeSyncing=false, timeIdx={};
 let currentSymbol='river', symbolList=[];
 
 // Get symbol from URL or default
@@ -210,6 +226,15 @@ function reg(id, chart, containerId, fields, firstSeries, firstSeriesData){
   if(firstSeriesData) firstSeriesData.forEach(d=>{ seriesDataMap[d.time]=d.value; });
   chartReg[id]={chart, tooltipEl:tt, fields, firstSeries, seriesDataMap};
   chart.subscribeCrosshairMove(p=>{ if(!syncing) syncAll(id, p.time||null); });
+  chart.timeScale().subscribeVisibleTimeRangeChange(range=>{
+    if(rangeSyncing||!range) return;
+    rangeSyncing=true;
+    for(const [oid,info] of Object.entries(chartReg)){
+      if(oid===id) continue;
+      try{ info.chart.timeScale().setVisibleRange(range); }catch(e){}
+    }
+    rangeSyncing=false;
+  });
 }
 
 function renderCharts(data){
@@ -362,6 +387,22 @@ function renderCharts(data){
       }
     }
   }
+
+  // Sync initial visible range from price chart to all others, so all charts
+  // start at the same time window and stay locked together on zoom/pan.
+  const masterId=chartReg['price']?'price':Object.keys(chartReg)[0];
+  if(masterId){
+    requestAnimationFrame(()=>{
+      const range=chartReg[masterId]&&chartReg[masterId].chart.timeScale().getVisibleRange();
+      if(!range) return;
+      rangeSyncing=true;
+      for(const [oid,info] of Object.entries(chartReg)){
+        if(oid===masterId) continue;
+        try{ info.chart.timeScale().setVisibleRange(range); }catch(e){}
+      }
+      rangeSyncing=false;
+    });
+  }
 }
 
 function renderPage(data){
@@ -374,14 +415,47 @@ function renderPage(data){
     <div class="refresh-bar"><div class="dot ${ago.level}"></div><span>最近數據：<span class="ago ${ago.level}">${ago.text}</span> (${latest.timestamp} UTC+8) · ${data.length} pts · 數據每15分鐘收集 · 頁面每5分鐘刷新</span></div>
     ${renderTimeSelector()}
     <div class="charts-grid">
-      <div class="chart-card full"><h3>💰 Price & Open Interest</h3><div id="chart-price" class="chart-container tall"></div></div>
-      <div class="chart-card"><h3>📊 Long/Short Ratios</h3><div id="chart-ls" class="chart-container"></div></div>
-      <div class="chart-card"><h3>🐋 Smart Money Positions (M USDT)</h3><div id="chart-positions" class="chart-container"></div></div>
-      <div class="chart-card"><h3>🐋 Whale Count</h3><div id="chart-whales" class="chart-container"></div></div>
-      <div class="chart-card"><h3>💵 Profit Rate</h3><div id="chart-profit" class="chart-container"></div></div>
-      <div class="chart-card"><h3>📈 Funding Rate</h3><div id="chart-funding" class="chart-container"></div></div>
-      <div class="chart-card"><h3>📋 Order Book Depth (K USDT)</h3><div id="chart-depth" class="chart-container"></div></div>
-      <div class="chart-card"><h3>🔗 On-chain Holders</h3><div id="chart-onchain" class="chart-container"></div></div>
+      <div class="chart-card full"><h3>💰 Price & Open Interest</h3><div class="desc">來源：<code>fapi/v1/ticker/24hr</code> + <code>fapi/v1/openInterest</code>｜定義：合約最新成交價 與 全市場未平倉合約名義價值（OI × Price，M USDT）</div><div id="chart-price" class="chart-container tall"></div></div>
+      <div class="chart-card full"><h3>🐋 Smart Money Positions (M USDT)</h3><div class="desc">來源：幣安 Smart Money <code>bapi/futures/v1/.../smart-money/signal/overview</code> 的 <code>longTradersQty</code> × 即時價｜定義：全體「聰明錢」（幣安內部演算法篩選的高勝率交易員，入選門檻未公開）Long / Short 持倉名義價值（M USDT）</div><div id="chart-positions" class="chart-container"></div></div>
+      <div class="chart-card full"><h3>📊 Long/Short Ratios</h3><div class="desc">來源：<code>globalLongShortAccountRatio</code>（全市場帳戶比）+ <code>topLongShortPositionRatio</code>（大戶持倉比，1h）｜定義：「大戶」= 幣安官方定義的<b>持倉量前 20% 帳戶</b>（與聰明錢/鯨魚是不同集合）；圖表為這兩種多空比的對比</div><div id="chart-ls" class="chart-container"></div></div>
+      <div class="chart-card"><h3>🐋 Whale Count</h3><div class="desc">來源：Smart Money <code>overview.longWhales / shortWhales</code>｜定義：聰明錢中**持倉規模特別大**的子集（聰明錢 ∩ 鯨魚）的當前 Long / Short 帳戶數；具體 USDT 門檻幣安未公開，並非全市場鯨魚</div><div id="chart-whales" class="chart-container"></div></div>
+      <div class="chart-card"><h3>💵 Profit Rate</h3><div class="desc">來源：Smart Money <code>overview.longTradersAvgEntryPrice</code> vs 即時價計算｜定義：<b>全體聰明錢</b>（非「大戶」、非「鯨魚」）Long / Short 倉位的未實現盈虧 %，公式 = (即時價 − 平均進場價) / 平均進場價</div><div id="chart-profit" class="chart-container"></div></div>
+      <div class="chart-card"><h3>📈 Funding Rate</h3><div class="desc">來源：<code>fapi/v1/fundingRate</code> + <code>futures/data/takerlongshortRatio</code>｜定義：合約資金費率（%，正=多付空）與主動成交（吃單）的買賣量比</div><div id="chart-funding" class="chart-container"></div></div>
+      <div class="chart-card"><h3>📋 Order Book Depth (K USDT)</h3><div class="desc">來源：<code>fapi/v1/depth?limit=20</code>｜定義：訂單簿前 20 檔的 Bid / Ask 名義總額（K USDT）、Bid/Ask 比值與最大買賣牆價位</div><div id="chart-depth" class="chart-container"></div></div>
+      <div class="chart-card"><h3>🔗 On-chain Holders</h3><div class="desc">來源：幣安 Web3 <code>bapi/defi/v4/.../wallet/market/token/dynamic/info</code>｜定義：鏈上 token 持有人數、Top10 集中度、Smart Money 持有人、流動池規模</div><div id="chart-onchain" class="chart-container"></div></div>
+    </div>
+    <div class="info-section">
+      <h2>📖 名詞與數據定義</h2>
+      <div class="info-sub">釐清「聰明錢 / 鯨魚 / 大戶」三個容易搞混的概念，以及每張圖表的具體計算方式。</div>
+
+      <h3>三種「精英帳戶」的差別</h3>
+      <table>
+        <thead><tr><th style="width:18%">名詞</th><th style="width:42%">資料來源</th><th>幣安定義</th></tr></thead>
+        <tbody>
+          <tr><td><b>聰明錢</b><br>Smart Money / Traders</td><td><code>smart-money/signal/overview</code> 的 <code>longTraders</code> / <code>shortTraders</code></td><td>幣安內部演算法篩選的「高勝率交易員」群體。<b>具體入選門檻官方未公開</b>，一般理解為長期高勝率 + 高 PnL 的帳戶集合。</td></tr>
+          <tr><td><b>鯨魚</b><br>Whales</td><td>同上 <code>longWhales</code> / <code>shortWhales</code></td><td>上述聰明錢中<b>持倉規模特別大</b>的子集（聰明錢 ∩ 鯨魚）。具體 USDT 門檻官方<b>未公開</b>。<b>不是</b>全市場鯨魚。</td></tr>
+          <tr><td><b>大戶</b><br>Top Traders</td><td><code>topLongShortPositionRatio</code> / <code>topLongShortAccountRatio</code></td><td>幣安官方定義：<b>合約持倉量前 20% 的帳戶</b>。純按持倉大小排，不論勝率 — 可能虧錢的大戶也算。<b>與聰明錢、鯨魚是完全不同的集合。</b></td></tr>
+        </tbody>
+      </table>
+
+      <h3>各圖表的數據定義</h3>
+      <table>
+        <thead><tr><th style="width:22%">圖表</th><th style="width:38%">API 來源</th><th>定義 / 計算方式</th></tr></thead>
+        <tbody>
+          <tr><td>💰 Price & Open Interest</td><td><code>fapi/v1/ticker/24hr</code><br><code>fapi/v1/openInterest</code></td><td>合約最新成交價；全市場未平倉合約名義價值（OI × Price，M USDT）。</td></tr>
+          <tr><td>🐋 Smart Money Positions</td><td><code>smart-money/signal/overview</code></td><td><b>全體聰明錢</b> Long / Short 持倉的名義價值 = <code>longTradersQty</code> × 即時價（M USDT）。</td></tr>
+          <tr><td>📊 Long/Short Ratios</td><td><code>globalLongShortAccountRatio</code><br><code>topLongShortPositionRatio</code></td><td>全市場帳戶數的多空比 vs <b>大戶（前 20%）</b>持倉的多空比。注意這裡的「大戶」<b>不是</b>聰明錢。</td></tr>
+          <tr><td>🐋 Whale Count</td><td><code>overview.longWhales</code><br><code>overview.shortWhales</code></td><td><b>聰明錢中的鯨魚帳戶數</b>（聰明錢 ∩ 鯨魚），即聰明錢之中持倉規模特別大的那一撮。<b>不是</b>全市場鯨魚數。</td></tr>
+          <tr><td>💵 Profit Rate</td><td><code>overview.longTradersAvgEntryPrice</code> + 即時價</td><td><b>全體聰明錢</b>（非「大戶」、非「鯨魚」）Long / Short 倉位的未實現盈虧 %。<br>公式：(即時價 − 平均進場價) / 平均進場價 × 100%</td></tr>
+          <tr><td>📈 Funding Rate</td><td><code>fapi/v1/fundingRate</code><br><code>futures/data/takerlongshortRatio</code></td><td>合約資金費率（%，正值代表多方付給空方）；主動成交（吃單）的買賣量比。</td></tr>
+          <tr><td>📋 Order Book Depth</td><td><code>fapi/v1/depth?limit=20</code></td><td>訂單簿前 20 檔 Bid / Ask 名義總額（K USDT）、Bid/Ask 比值與最大買賣牆價位。</td></tr>
+          <tr><td>🔗 On-chain Holders</td><td>幣安 Web3 <code>wallet/market/token/dynamic/info</code></td><td>鏈上 token 持有人數、Top10 持倉集中度、Smart Money 持有人、流動池規模（僅 BNB 等部分標的有此資料）。</td></tr>
+        </tbody>
+      </table>
+
+      <div class="warn">
+        ⚠️ <b>誠實聲明：</b>幣安對「聰明錢入選標準」與「鯨魚的 USDT 持倉門檻」<b>都沒有公開精確數字</b>。網路上流傳的具體門檻（例如「持倉 &gt; 100 BTC 算鯨魚」）皆為民間推測，不可作為交易依據。本站只能依官方有開放的欄位呈現。
+      </div>
     </div>`;
   buildTimeIndex(data);
   renderCharts(data);
