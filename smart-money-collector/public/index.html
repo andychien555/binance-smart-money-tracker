@@ -371,7 +371,7 @@ function renderPage(data){
   document.getElementById('app').innerHTML=`
     ${renderSymbolBar()}
     ${renderHeader(latest)}${renderStats(latest)}
-    <div class="refresh-bar"><div class="dot ${ago.level}"></div><span>最近數據：<span class="ago ${ago.level}">${ago.text}</span> (${latest.timestamp} UTC+8) · ${data.length} pts · 數據每5分鐘收集 · 頁面每5分鐘刷新</span></div>
+    <div class="refresh-bar"><div class="dot ${ago.level}"></div><span>最近數據：<span class="ago ${ago.level}">${ago.text}</span> (${latest.timestamp} UTC+8) · ${data.length} pts · 數據每15分鐘收集 · 頁面每5分鐘刷新</span></div>
     ${renderTimeSelector()}
     <div class="charts-grid">
       <div class="chart-card full"><h3>💰 Price & Open Interest</h3><div id="chart-price" class="chart-container tall"></div></div>
