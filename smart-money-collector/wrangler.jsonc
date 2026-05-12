@@ -1,0 +1,24 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "smart-money-collector",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-05-12",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true,
+	"triggers": {
+		"crons": ["*/15 * * * *"]
+	},
+	"r2_buckets": [
+		{
+			"binding": "DATA",
+			"bucket_name": "smart-money-data"
+		}
+	]
+}
