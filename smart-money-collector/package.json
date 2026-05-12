@@ -6,6 +6,7 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev --remote",
     "dev:local": "wrangler dev",
+    "dev:seed": "bash scripts/seed-local-r2.sh",
     "start": "wrangler dev --remote",
     "test": "vitest --passWithNoTests",
     "cf-typegen": "wrangler types"
