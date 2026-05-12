@@ -73,13 +73,14 @@ let currentSymbol='river', symbolList=[];
 const urlParams=new URLSearchParams(window.location.search);
 if(urlParams.get('symbol')) currentSymbol=urlParams.get('symbol').toLowerCase();
 
+const DATA_BASE='https://smart-money-collector.andychien-design.workers.dev/data';
 const HIDDEN_SYMBOLS=new Set(['siren','lit','rave','pippin','beat','power']);
 async function fetchSymbols(){
-  const list=await (await fetch('data/symbols.json')).json();
+  const list=await (await fetch(`${DATA_BASE}/symbols.json`)).json();
   return list.filter(s=>!HIDDEN_SYMBOLS.has(s.symbol.toLowerCase()));
 }
 async function fetchData(h){
-  const all=(await fetch(`data/${currentSymbol}/history_full.json`)).json().then(d=>d||[]);
+  const all=(await fetch(`${DATA_BASE}/${currentSymbol}/history_full.json`)).json().then(d=>d||[]);
   const data=await all;
   if(h>=9999||!h) return data;
   const cutoff=Date.now()-(h*3600*1000);

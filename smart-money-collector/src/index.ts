@@ -1,18 +1,36 @@
 const UA =
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/142.0.0.0 Safari/537.36";
 
-const SYMBOLS = ["RIVERUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"] as const;
-
-const ONCHAIN_CONFIG: Record<string, { chain: string; addr: string }> = {
-	RIVERUSDT: {
-		chain: "56",
-		addr: "0xda7ad9dea9397cffddae2f8a052b82f1484252b3",
-	},
+type SymbolMeta = {
+	symbol: string;
+	short: string;
+	label: string;
+	onchain?: { chain: string; addr: string };
 };
+
+const SYMBOLS_META: SymbolMeta[] = [
+	{
+		symbol: "RIVERUSDT",
+		short: "river",
+		label: "RIVER/USDT",
+		onchain: {
+			chain: "56",
+			addr: "0xda7ad9dea9397cffddae2f8a052b82f1484252b3",
+		},
+	},
+	{ symbol: "BTCUSDT", short: "btc", label: "BTC/USDT" },
+	{ symbol: "ETHUSDT", short: "eth", label: "ETH/USDT" },
+	{ symbol: "SOLUSDT", short: "sol", label: "SOL/USDT" },
+];
 
 const HISTORY_LIMIT = 3000;
 
 type Env = { DATA: R2Bucket };
+
+const CORS_HEADERS = {
+	"access-control-allow-origin": "*",
+	"access-control-allow-methods": "GET, HEAD, OPTIONS",
+};
 
 async function fetchJson<T = any>(
 	url: string,
@@ -51,10 +69,11 @@ function tsTaipei(now: Date): string {
 }
 
 async function collectSymbol(
-	symbol: string,
+	meta: SymbolMeta,
 	env: Env,
 	btcTicker: any | null,
-): Promise<{ symbol: string; row: Record<string, any>; historyCount: number }> {
+): Promise<{ row: Record<string, any>; historyCount: number }> {
+	const { symbol } = meta;
 	const ts = tsTaipei(new Date());
 
 	const baseSm =
@@ -97,7 +116,6 @@ async function collectSymbol(
 	const topLsPos = topLsPosArr[0];
 	const price = parseFloat(ticker.lastPrice);
 
-	const oncfg = ONCHAIN_CONFIG[symbol];
 	const [takerData, depthData, aggTrades, web3Dynamic] = await Promise.all([
 		fetchSafe("taker-ratio", () =>
 			fetchJson<any[]>(
@@ -110,10 +128,10 @@ async function collectSymbol(
 		fetchSafe("aggTrades", () =>
 			fetchJson<any[]>(`${baseF}/fapi/v1/aggTrades?symbol=${symbol}&limit=200`),
 		),
-		oncfg
+		meta.onchain
 			? fetchSafe("web3-dynamic", () =>
 					fetchJson<any>(
-						`https://web3.binance.com/bapi/defi/v4/public/wallet-direct/buw/wallet/market/token/dynamic/info?chainId=${oncfg.chain}&contractAddress=${oncfg.addr}`,
+						`https://web3.binance.com/bapi/defi/v4/public/wallet-direct/buw/wallet/market/token/dynamic/info?chainId=${meta.onchain!.chain}&contractAddress=${meta.onchain!.addr}`,
 						{ "Accept-Encoding": "identity" },
 					),
 				)
@@ -272,7 +290,7 @@ async function collectSymbol(
 	]);
 
 	console.log(`[OK] ${symbol} $${price} @ ${ts} (${history.length} pts)`);
-	return { symbol, row, historyCount: history.length };
+	return { row, historyCount: history.length };
 }
 
 async function runCollection(env: Env) {
@@ -281,35 +299,71 @@ async function runCollection(env: Env) {
 	);
 
 	const results = await Promise.allSettled(
-		SYMBOLS.map((s) => collectSymbol(s, env, btcTicker)),
+		SYMBOLS_META.map((m) => collectSymbol(m, env, btcTicker)),
 	);
 
-	const summary: any[] = SYMBOLS.map((sym, i) => {
+	const summary = SYMBOLS_META.map((meta, i) => {
 		const r = results[i];
 		if (r.status === "fulfilled") {
 			return {
-				symbol: sym,
-				last_ts: r.value.row.timestamp,
+				symbol: meta.short,
+				label: meta.label,
 				price: r.value.row.price,
+				change_pct: r.value.row.price_change_pct,
+				has_data: true,
 				history_count: r.value.historyCount,
+				last_ts: r.value.row.timestamp,
 			};
 		}
-		console.error(`[ERROR] ${sym}:`, r.reason);
-		return { symbol: sym, error: String(r.reason) };
+		console.error(`[ERROR] ${meta.symbol}:`, r.reason);
+		return {
+			symbol: meta.short,
+			label: meta.label,
+			price: null,
+			change_pct: null,
+			has_data: false,
+			error: String(r.reason),
+		};
 	});
 
 	await env.DATA.put(
 		"symbols.json",
-		JSON.stringify({
-			updated_at: new Date().toISOString(),
-			symbols: summary,
-		}),
+		JSON.stringify(summary),
+		{ httpMetadata: { contentType: "application/json" } },
+	);
+	await env.DATA.put(
+		"meta.json",
+		JSON.stringify({ updated_at: new Date().toISOString() }),
 		{ httpMetadata: { contentType: "application/json" } },
 	);
 
 	const ok = results.filter((r) => r.status === "fulfilled").length;
-	console.log(`Done: ${ok}/${SYMBOLS.length} symbols collected`);
-	return { ok, total: SYMBOLS.length, summary };
+	console.log(`Done: ${ok}/${SYMBOLS_META.length} symbols collected`);
+	return { ok, total: SYMBOLS_META.length, summary };
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+	return new Response(JSON.stringify(body), {
+		status,
+		headers: {
+			"content-type": "application/json",
+			"cache-control": "public, max-age=30",
+			...CORS_HEADERS,
+		},
+	});
+}
+
+async function serveR2(env: Env, key: string): Promise<Response> {
+	const obj = await env.DATA.get(key);
+	if (!obj) return jsonResponse({ error: "not found", key }, 404);
+	return new Response(obj.body, {
+		status: 200,
+		headers: {
+			"content-type": "application/json",
+			"cache-control": "public, max-age=30",
+			...CORS_HEADERS,
+		},
+	});
 }
 
 export default {
@@ -318,14 +372,38 @@ export default {
 	},
 
 	async fetch(request, env, _ctx): Promise<Response> {
-		const url = new URL(request.url);
-		if (url.pathname === "/run") {
-			const result = await runCollection(env);
-			return Response.json(result);
+		if (request.method === "OPTIONS") {
+			return new Response(null, { status: 204, headers: CORS_HEADERS });
 		}
+
+		const url = new URL(request.url);
+		const p = url.pathname;
+
+		if (p === "/run") {
+			const result = await runCollection(env);
+			return jsonResponse(result);
+		}
+
+		if (p === "/data/symbols.json") {
+			return serveR2(env, "symbols.json");
+		}
+
+		const m = p.match(/^\/data\/([a-z0-9]+)\/(history_full|prev_row)\.json$/);
+		if (m) {
+			const meta = SYMBOLS_META.find((x) => x.short === m[1]);
+			if (!meta) return jsonResponse({ error: "unknown symbol" }, 404);
+			return serveR2(env, `${meta.symbol}/${m[2]}.json`);
+		}
+
 		return new Response(
-			"smart-money-collector OK\nGET /run to trigger collection manually",
-			{ headers: { "content-type": "text/plain" } },
+			"smart-money-collector\n\n" +
+				"GET /run                              trigger collection now\n" +
+				"GET /data/symbols.json                list of symbols\n" +
+				"GET /data/<short>/prev_row.json       latest row\n" +
+				"GET /data/<short>/history_full.json   ring buffer (up to 3000)\n\n" +
+				"symbols: " +
+				SYMBOLS_META.map((m) => m.short).join(", "),
+			{ headers: { "content-type": "text/plain", ...CORS_HEADERS } },
 		);
 	},
 } satisfies ExportedHandler<Env>;
