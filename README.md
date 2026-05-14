@@ -54,7 +54,7 @@
 │    cron trigger: */15 * * * *                                  │
 │      └─ scheduled handler                                      │
 │            ├─ fetch 3 binance hosts × 4 symbols                │
-│            │   (透過 Mac proxy，見下)                          │
+│            │   (透過 DO proxy，見下)                           │
 │            └─ write to R2 bucket `smart-money-data`            │
 │                                                                │
 │    fetch handler (CORS-enabled JSON proxy)                     │
@@ -63,17 +63,17 @@
 │      GET /data/<short>/history_full.json                       │
 │      GET /run    (manual trigger)                              │
 └────┬──────────────────────────────────────────────┬────────────┘
-     │ R2 binding                                   │ outbound fetch
+     │ R2 binding                                   │ outbound HTTPS
      ▼                                              ▼
 ┌────────────────────────┐    ┌─────────────────────────────────┐
-│ R2: smart-money-data   │    │ Cloudflare Tunnel               │
-│  <SYMBOL>/prev_row     │    │ <id>.trycloudflare.com          │
-│  <SYMBOL>/history_full │    └────────────────┬────────────────┘
-│  symbols.json          │                     │ cloudflared
-│  meta.json             │                     ▼
-└──────────┬─────────────┘    ┌─────────────────────────────────┐
-           ▲                  │ Mac proxy (mac-proxy/proxy.mjs) │
-           │ fetch (CORS)     │ 127.0.0.1:8787                  │
+│ R2: smart-money-data   │    │ DigitalOcean SGP1 (Singapore)   │
+│  <SYMBOL>/prev_row     │    │ 167.172.64.49                   │
+│  <SYMBOL>/history_full │    │                                 │
+│  symbols.json          │    │ Caddy (443, Let's Encrypt)      │
+│  meta.json             │    │   └─ reverse_proxy → :8787      │
+└──────────┬─────────────┘    │                                 │
+           ▲                  │ systemd: binance-proxy.service  │
+           │ fetch (CORS)     │   └─ node proxy.mjs (port 8787) │
 ┌──────────┴───────────┐      └────────────────┬────────────────┘
 │ Browser (static SPA) │                       │
 │  index.html          │                       ▼
@@ -83,7 +83,7 @@
 ```
 
 - **無後端 server / 無 GH Actions**：原本是 server cron + git push + GH Pages 讀 repo `data/`；現在改成 CF Worker cron + R2 物件儲存
-- **Mac proxy 中繼**：Binance 從 2026-05-13 起對 CF edge IP 回 451，所以 Worker 不直接打 Binance，改走 CF Tunnel → 本機 Mac proxy → Binance。詳見 [mac-proxy/README.md](mac-proxy/README.md)
+- **DO proxy 中繼**：Binance 從 2026-05-13 起對 CF edge anycast IP 回 451，所以 Worker 不直接打 Binance，改走 DO Singapore 機房（IP 信譽乾淨、Binance 200）→ Caddy HTTPS → Node proxy → Binance。詳見 [mac-proxy/README.md](mac-proxy/README.md)（資料夾名稱保留 historical reasons，內容已是 DO 版）
 - **環形緩衝**：每個 `history_full.json` 最多 3000 筆 ≈ 31 天（15 分鐘間隔）
 - **CORS / cache**：Worker `/data/*` 路由附 `Access-Control-Allow-Origin: *` 和 `Cache-Control: public, max-age=30`
 
@@ -100,10 +100,10 @@
 │   ├── wrangler.jsonc                  # cron + R2 binding + assets 設定
 │   ├── package.json
 │   └── tsconfig.json
-├── mac-proxy/                          # 本機 proxy + CF Tunnel（繞 Binance 451）
-│   ├── proxy.mjs                       # Node HTTP proxy
-│   ├── start.sh / stop.sh              # 一鍵啟動 / 停止
-│   └── README.md                       # 操作說明（必讀）
+├── mac-proxy/                          # proxy 原始碼（現役部署在 DO，非 Mac；資料夾名稱待整理）
+│   ├── proxy.mjs                       # Node HTTP proxy（同一份在 DO /root/.openclaw/workspace/mac-proxy/）
+│   ├── start.sh / stop.sh              # （舊）Mac 啟停腳本，DO 上用 systemctl 管
+│   └── README.md                       # DO 部署 / 操作 / debug（必讀）
 ├── data/                               # （舊）Python collector 留下的歷史 JSON
 ├── scripts/                            # （舊）Python collector 的 shell wrapper
 └── server/                             # （舊）Flask 備用版，未啟用
@@ -170,7 +170,7 @@ npm run deploy                    # = wrangler deploy
 
 Deploy 會同時上傳 `src/index.ts`（Worker 邏輯）跟 `public/`（前端 assets）。Cron 自動上線，下一個 `*/15` 整點就會跑。R2 bucket `smart-money-data` 需事先建好。
 
-⚠️ Worker 依賴兩個 secret：`PROXY_BASE`（Mac tunnel URL）、`PROXY_TOKEN`（proxy 驗證密鑰）。詳見 [mac-proxy/README.md](mac-proxy/README.md)。
+⚠️ Worker 依賴兩個 secret：`PROXY_BASE`（DO HTTPS URL，目前 `https://167.172.64.49.nip.io`）、`PROXY_TOKEN`（proxy 驗證密鑰）。詳見 [mac-proxy/README.md](mac-proxy/README.md)。
 
 ---
 
@@ -216,8 +216,10 @@ curl https://smart-money-collector.andychien-design.workers.dev/data/symbols.jso
 每筆 `last_ts` 距現在應該不超過 15 分鐘（UTC+8 字串格式 `YYYY-MM-DD HH:MM`）。
 
 如果出現 `has_data: false`，看 `error` 欄判斷：
-- `HTTP 451` — Binance 又開始封 CF edge IP（極少見，目前已經透過 mac-proxy 繞過）
-- `HTTP 530` — Cloudflare 連不到 Mac proxy（tunnel 死了 / cloudflared 進 reconnect loop）
+- `HTTP 451` — Binance 開始封 DO 那台 IP（可能性低，DO Singapore IP 信譽乾淨）。換掉 DO 那台、或加更多出口
+- `HTTP 530` / `HTTP 525` — Caddy 那層問題（cert 沒簽到、systemd 沒啟動）
+- `HTTP 502` from proxy — proxy.mjs 連不到 Binance（DNS / network issue），少見
+- `HTTP 403` from proxy — Worker `PROXY_TOKEN` 跟 DO `.env` 的 `PROXY_SECRET` 對不上
 - `HTTP 5xx` from Binance — Binance 短暫故障，下個 cron 通常會恢復
 
-恢復方式 → 詳見 [mac-proxy/README.md](mac-proxy/README.md) 的「Mac 重開機 / cloudflared 掛了之後恢復」（直接跑 `mac-proxy/start.sh`）。
+debug 步驟與恢復方式 → [mac-proxy/README.md](mac-proxy/README.md)。
