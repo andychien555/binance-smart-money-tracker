@@ -25,19 +25,35 @@ const SYMBOLS_META: SymbolMeta[] = [
 
 const HISTORY_LIMIT = 3000;
 
-type Env = { DATA: R2Bucket };
+type Env = {
+	DATA: R2Bucket;
+	PROXY_BASE: string;
+	PROXY_TOKEN: string;
+};
 
 const CORS_HEADERS = {
 	"access-control-allow-origin": "*",
 	"access-control-allow-methods": "GET, HEAD, OPTIONS",
 };
 
+function proxyUrl(env: Env, originalUrl: string): string {
+	return originalUrl
+		.replace("https://fapi.binance.com", `${env.PROXY_BASE}/host-fapi`)
+		.replace("https://www.binance.com", `${env.PROXY_BASE}/host-www`)
+		.replace("https://web3.binance.com", `${env.PROXY_BASE}/host-web3`);
+}
+
 async function fetchJson<T = any>(
+	env: Env,
 	url: string,
 	headers?: Record<string, string>,
 ): Promise<T> {
-	const resp = await fetch(url, {
-		headers: { "User-Agent": UA, ...(headers ?? {}) },
+	const resp = await fetch(proxyUrl(env, url), {
+		headers: {
+			"User-Agent": UA,
+			"X-Proxy-Token": env.PROXY_TOKEN,
+			...(headers ?? {}),
+		},
 	});
 	if (!resp.ok) {
 		throw new Error(`HTTP ${resp.status} ${resp.statusText} for ${url}`);
@@ -93,18 +109,24 @@ async function collectSymbol(
 		globalLsArr,
 		topLsPosArr,
 	] = await Promise.all([
-		fetchJson<any>(`${baseSm}/overview?symbol=${symbol}`, smHeaders),
+		fetchJson<any>(env, `${baseSm}/overview?symbol=${symbol}`, smHeaders),
 		fetchJson<any>(
+			env,
 			`${baseSm}/details/stats?symbol=${symbol}&timeRange=30m`,
 			smHeaders,
 		),
-		fetchJson<any>(`${baseF}/fapi/v1/ticker/24hr?symbol=${symbol}`),
-		fetchJson<any>(`${baseF}/fapi/v1/openInterest?symbol=${symbol}`),
-		fetchJson<any[]>(`${baseF}/fapi/v1/fundingRate?symbol=${symbol}&limit=1`),
+		fetchJson<any>(env, `${baseF}/fapi/v1/ticker/24hr?symbol=${symbol}`),
+		fetchJson<any>(env, `${baseF}/fapi/v1/openInterest?symbol=${symbol}`),
 		fetchJson<any[]>(
+			env,
+			`${baseF}/fapi/v1/fundingRate?symbol=${symbol}&limit=1`,
+		),
+		fetchJson<any[]>(
+			env,
 			`${baseF}/futures/data/globalLongShortAccountRatio?symbol=${symbol}&period=1h&limit=1`,
 		),
 		fetchJson<any[]>(
+			env,
 			`${baseF}/futures/data/topLongShortPositionRatio?symbol=${symbol}&period=1h&limit=1`,
 		),
 	]);
@@ -119,18 +141,23 @@ async function collectSymbol(
 	const [takerData, depthData, aggTrades, web3Dynamic] = await Promise.all([
 		fetchSafe("taker-ratio", () =>
 			fetchJson<any[]>(
+				env,
 				`${baseF}/futures/data/takerlongshortRatio?symbol=${symbol}&period=1h&limit=3`,
 			),
 		),
 		fetchSafe("depth", () =>
-			fetchJson<any>(`${baseF}/fapi/v1/depth?symbol=${symbol}&limit=20`),
+			fetchJson<any>(env, `${baseF}/fapi/v1/depth?symbol=${symbol}&limit=20`),
 		),
 		fetchSafe("aggTrades", () =>
-			fetchJson<any[]>(`${baseF}/fapi/v1/aggTrades?symbol=${symbol}&limit=200`),
+			fetchJson<any[]>(
+				env,
+				`${baseF}/fapi/v1/aggTrades?symbol=${symbol}&limit=200`,
+			),
 		),
 		meta.onchain
 			? fetchSafe("web3-dynamic", () =>
 					fetchJson<any>(
+						env,
 						`https://web3.binance.com/bapi/defi/v4/public/wallet-direct/buw/wallet/market/token/dynamic/info?chainId=${meta.onchain!.chain}&contractAddress=${meta.onchain!.addr}`,
 						{ "Accept-Encoding": "identity" },
 					),
@@ -295,7 +322,10 @@ async function collectSymbol(
 
 async function runCollection(env: Env) {
 	const btcTicker = await fetchSafe("btc-ref", () =>
-		fetchJson<any>("https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT"),
+		fetchJson<any>(
+			env,
+			"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT",
+		),
 	);
 
 	const results = await Promise.allSettled(

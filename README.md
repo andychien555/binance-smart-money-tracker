@@ -2,7 +2,7 @@
 
 把 Binance Futures「聰明錢」訊號 + 訂單簿 / 大單 / 鏈上持有人結構，每 15 分鐘抓一次、寫進 Cloudflare R2，前端純 static 從 Worker 讀。
 
-線上版：以這個 repo 的 GitHub Pages 部署為準。
+線上版：[https://smart-money-collector.andychien-design.workers.dev/](https://smart-money-collector.andychien-design.workers.dev/) — 前端 SPA 與 API 都由同一個 Cloudflare Worker 提供（static assets 走 `assets` binding，資料走 `/data/*` 路由）。
 
 ---
 
@@ -54,6 +54,7 @@
 │    cron trigger: */15 * * * *                                  │
 │      └─ scheduled handler                                      │
 │            ├─ fetch 3 binance hosts × 4 symbols                │
+│            │   (透過 Mac proxy，見下)                          │
 │            └─ write to R2 bucket `smart-money-data`            │
 │                                                                │
 │    fetch handler (CORS-enabled JSON proxy)                     │
@@ -61,32 +62,30 @@
 │      GET /data/<short>/prev_row.json                           │
 │      GET /data/<short>/history_full.json                       │
 │      GET /run    (manual trigger)                              │
-└──────────────────────────────┬─────────────────────────────────┘
-                               │ R2 binding
-                               ▼
-                  ┌────────────────────────────┐
-                  │  R2 bucket: smart-money-   │
-                  │  data                      │
-                  │   <SYMBOL>/prev_row.json   │
-                  │   <SYMBOL>/history_full.   │
-                  │   json (≤3000 筆)          │
-                  │   symbols.json             │
-                  │   meta.json                │
-                  └────────────────────────────┘
-                               ▲
-                               │ fetch (CORS)
-                  ┌────────────┴───────────┐
-                  │  Browser (static SPA)  │
-                  │  index.html            │
-                  │  lightweight-charts    │
-                  └────────────────────────┘
+└────┬──────────────────────────────────────────────┬────────────┘
+     │ R2 binding                                   │ outbound fetch
+     ▼                                              ▼
+┌────────────────────────┐    ┌─────────────────────────────────┐
+│ R2: smart-money-data   │    │ Cloudflare Tunnel               │
+│  <SYMBOL>/prev_row     │    │ <id>.trycloudflare.com          │
+│  <SYMBOL>/history_full │    └────────────────┬────────────────┘
+│  symbols.json          │                     │ cloudflared
+│  meta.json             │                     ▼
+└──────────┬─────────────┘    ┌─────────────────────────────────┐
+           ▲                  │ Mac proxy (mac-proxy/proxy.mjs) │
+           │ fetch (CORS)     │ 127.0.0.1:8787                  │
+┌──────────┴───────────┐      └────────────────┬────────────────┘
+│ Browser (static SPA) │                       │
+│  index.html          │                       ▼
+│  lightweight-charts  │              ┌─────────────────┐
+└──────────────────────┘              │ binance.com APIs│
+                                      └─────────────────┘
 ```
 
 - **無後端 server / 無 GH Actions**：原本是 server cron + git push + GH Pages 讀 repo `data/`；現在改成 CF Worker cron + R2 物件儲存
+- **Mac proxy 中繼**：Binance 從 2026-05-13 起對 CF edge IP 回 451，所以 Worker 不直接打 Binance，改走 CF Tunnel → 本機 Mac proxy → Binance。詳見 [mac-proxy/README.md](mac-proxy/README.md)
 - **環形緩衝**：每個 `history_full.json` 最多 3000 筆 ≈ 31 天（15 分鐘間隔）
 - **CORS / cache**：Worker `/data/*` 路由附 `Access-Control-Allow-Origin: *` 和 `Cache-Control: public, max-age=30`
-
-線上 Worker URL：`https://smart-money-collector.andychien-design.workers.dev`
 
 ---
 
@@ -94,45 +93,55 @@
 
 ```
 .
-├── index.html                          # 前端（單檔，純 vanilla JS）
-├── smart-money-collector/              # Cloudflare Worker
-│   ├── src/index.ts                    # scheduled + fetch handler
-│   ├── wrangler.jsonc                  # cron + R2 binding 設定
+├── smart-money-collector/              # Cloudflare Worker（含前端 SPA）
+│   ├── src/index.ts                    # scheduled handler + /data/* + /run
+│   ├── public/index.html               # 前端（單檔，純 vanilla JS + lightweight-charts）
+│   ├── scripts/seed-local-r2.sh        # 把線上 R2 抓回本機 miniflare（dev 用）
+│   ├── wrangler.jsonc                  # cron + R2 binding + assets 設定
 │   ├── package.json
 │   └── tsconfig.json
+├── mac-proxy/                          # 本機 proxy + CF Tunnel（繞 Binance 451）
+│   ├── proxy.mjs                       # Node HTTP proxy
+│   ├── start.sh / stop.sh              # 一鍵啟動 / 停止
+│   └── README.md                       # 操作說明（必讀）
 ├── data/                               # （舊）Python collector 留下的歷史 JSON
+├── scripts/                            # （舊）Python collector 的 shell wrapper
 └── server/                             # （舊）Flask 備用版，未啟用
 ```
 
-舊的 `scripts/` Python collector 跟 `.github/workflows/collect.yml` 已移除（被 Worker 取代）。`data/` 跟 `server/` 是舊架構遺物，可以保留當 archive。
+`.github/workflows/collect.yml`（舊 GH Actions cron）已移除，被 Worker cron 取代。`data/`、`scripts/`、`server/` 是 Python collector 時代的遺物，目前沒在用，保留當 archive。
 
 ---
 
 ## 本機開發
 
-### 前端
+前端與 Worker 同一個 process — `wrangler dev` 起來會同時 serve `public/index.html` 與 `/data/*` API。
 
-```bash
-cd BN_Smart_Money_Tracker
-python3 -m http.server 8000
-# 開 http://localhost:8000
-```
-
-`index.html` 用 `DATA_BASE` 指向線上 Worker，所以本機開頁面也能看到即時資料。
-
-### Worker
+### Remote 模式（接真實 R2 / 真實 cron）
 
 ```bash
 cd smart-money-collector
 npx wrangler login                # 首次
-npx wrangler dev --remote         # 跑在 CF edge，用真實 R2
+npm run dev                       # = wrangler dev --remote
+# 開 http://localhost:8787 看前端
 ```
 
-dev server 起來後：
+跑起來後：
+- `http://localhost:8787/` — 前端 SPA
 - `curl http://localhost:8787/run` — 手動觸發一次完整收集
 - `curl "http://localhost:8787/__scheduled?cron=*/15+*+*+*+*"` — 模擬 cron 觸發
 
-⚠️ `wrangler dev --remote` 的 R2 binding 是**真實 bucket**（不是沙盒），會寫入 production 資料。
+⚠️ `--remote` 的 R2 binding 是**真實 bucket**（不是 sandbox），手動觸發會寫入 production 資料。
+
+### Local 模式（離線、用 seed 資料）
+
+```bash
+cd smart-money-collector
+npm run dev:seed                  # 從線上 Worker 抓 symbols.json + 各 symbol 資料寫進 miniflare 本機 R2
+npm run dev:local                 # = wrangler dev（純本機，不打 binance / 不寫線上 R2）
+```
+
+適合純前端 / Worker 路由的離線開發，不會跑採集也不會動到線上資料。
 
 ### 直接查 R2
 
@@ -141,7 +150,7 @@ npx wrangler r2 object get smart-money-data/symbols.json --remote --pipe | jq
 npx wrangler r2 object get smart-money-data/RIVERUSDT/prev_row.json --remote --pipe | jq
 ```
 
-⚠️ 一定要加 `--remote`，預設是 `--local`（會撈本機 miniflare sandbox，永遠 not found）。
+⚠️ 一定要加 `--remote`，預設是 `--local`（撈本機 miniflare sandbox，沒 seed 過就 not found）。
 
 ### Worker logs
 
@@ -156,10 +165,12 @@ npx wrangler tail
 
 ```bash
 cd smart-money-collector
-npx wrangler deploy
+npm run deploy                    # = wrangler deploy
 ```
 
-Deploy 後 cron 自動上線，下一個 `*/15` 整點就會跑。R2 bucket `smart-money-data` 需事先建好。
+Deploy 會同時上傳 `src/index.ts`（Worker 邏輯）跟 `public/`（前端 assets）。Cron 自動上線，下一個 `*/15` 整點就會跑。R2 bucket `smart-money-data` 需事先建好。
+
+⚠️ Worker 依賴兩個 secret：`PROXY_BASE`（Mac tunnel URL）、`PROXY_TOKEN`（proxy 驗證密鑰）。詳見 [mac-proxy/README.md](mac-proxy/README.md)。
 
 ---
 
@@ -186,13 +197,13 @@ const SYMBOLS_META: SymbolMeta[] = [
 
 ## 隱藏 / 顯示某個 symbol
 
-編 [index.html](index.html) 裡的 `HIDDEN_SYMBOLS`：
+編 [smart-money-collector/public/index.html](smart-money-collector/public/index.html) 裡的 `HIDDEN_SYMBOLS`：
 
 ```js
 const HIDDEN_SYMBOLS = new Set(['siren','lit']);  // 短名
 ```
 
-資料採集不受影響。
+資料採集不受影響。改完 `npm run deploy` 上線。
 
 ---
 
@@ -203,3 +214,10 @@ curl https://smart-money-collector.andychien-design.workers.dev/data/symbols.jso
 ```
 
 每筆 `last_ts` 距現在應該不超過 15 分鐘（UTC+8 字串格式 `YYYY-MM-DD HH:MM`）。
+
+如果出現 `has_data: false`，看 `error` 欄判斷：
+- `HTTP 451` — Binance 又開始封 CF edge IP（極少見，目前已經透過 mac-proxy 繞過）
+- `HTTP 530` — Cloudflare 連不到 Mac proxy（tunnel 死了 / cloudflared 進 reconnect loop）
+- `HTTP 5xx` from Binance — Binance 短暫故障，下個 cron 通常會恢復
+
+恢復方式 → 詳見 [mac-proxy/README.md](mac-proxy/README.md) 的「Mac 重開機 / cloudflared 掛了之後恢復」（直接跑 `mac-proxy/start.sh`）。
