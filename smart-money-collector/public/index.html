@@ -55,20 +55,21 @@
   .mono { font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
 
   /* === Symbol bar === */
-  .symbol-bar { display:flex; gap:var(--s-1); padding:var(--s-4) var(--s-5) var(--s-2); flex-wrap:wrap; align-items:stretch; }
+  .symbol-bar { display:flex; gap:var(--s-2); padding:var(--s-4) var(--s-5) var(--s-2); flex-wrap:wrap; align-items:stretch; }
   .sym-btn {
-    background:transparent; border:none; color:var(--fg-2);
-    padding:var(--s-2) var(--s-3); border-radius:var(--r-xs);
-    cursor:pointer; transition:background .15s ease-out, color .15s ease-out;
+    background:var(--surface); border:1px solid var(--line); color:var(--fg-2);
+    padding:var(--s-2) var(--s-3); border-radius:var(--r-sm);
+    cursor:pointer; transition:background .15s ease-out, color .15s ease-out, border-color .15s ease-out;
     display:flex; flex-direction:column; align-items:flex-start; gap:2px;
-    position:relative; font-family:var(--font-sans);
+    font-family:var(--font-sans);
   }
-  .sym-btn:hover { background:var(--surface-2); color:var(--fg); }
-  .sym-btn.active { color:var(--fg); }
-  .sym-btn.active::after {
-    content:''; position:absolute; left:var(--s-3); right:var(--s-3); bottom:-2px;
-    height:2px; background:var(--accent); border-radius:1px;
+  .sym-btn:hover { background:var(--surface-2); color:var(--fg); border-color:#2a2c31; }
+  .sym-btn.active {
+    background:var(--accent); border-color:var(--accent); color:var(--accent-fg);
   }
+  .sym-btn.active .sym-name,
+  .sym-btn.active .sym-price,
+  .sym-btn.active .sym-chg { color:var(--accent-fg); }
   .sym-btn .sym-name {
     font-family:var(--font-mono); font-size:13px; font-weight:500;
     letter-spacing:-0.01em; color:var(--fg);
@@ -79,7 +80,7 @@
   }
   .sym-btn .sym-chg { font-size:10px; font-weight:500; }
   .sym-btn.no-data { opacity:0.35; cursor:not-allowed; }
-  .sym-btn.no-data:hover { background:transparent; color:var(--fg-2); }
+  .sym-btn.no-data:hover { background:var(--surface); color:var(--fg-2); border-color:var(--line); }
 
   /* === Header === */
   .header { padding:var(--s-3) var(--s-5) var(--s-3); display:flex; align-items:baseline; gap:var(--s-4); flex-wrap:wrap; }
@@ -133,18 +134,19 @@
   .refresh-bar .ago.warn { color:var(--amber); }
   .refresh-bar .ago.stale { color:var(--bear); }
 
-  /* === Time selector (underline tabs) === */
-  .time-selector { display:flex; gap:var(--s-4); padding:0 var(--s-5) var(--s-3); border-bottom:1px solid var(--line-soft); margin-bottom:var(--s-3); }
+  /* === Time selector (button row, evenly distributed) === */
+  .time-selector { display:flex; gap:var(--s-1); padding:0 var(--s-5) var(--s-3); margin-bottom:var(--s-3); }
   .time-btn {
-    background:transparent; border:none; color:var(--fg-3);
-    padding:var(--s-2) 0 var(--s-2); cursor:pointer;
+    flex:1;
+    background:var(--surface); border:1px solid var(--line); color:var(--fg-2);
+    padding:var(--s-2) var(--s-3); cursor:pointer;
     font-family:var(--font-mono); font-size:11px; font-weight:500;
     letter-spacing:0.06em; text-transform:uppercase;
-    border-bottom:2px solid transparent; margin-bottom:-1px;
-    transition:color .15s ease-out, border-color .15s ease-out;
+    border-radius:var(--r-sm); text-align:center;
+    transition:background .15s ease-out, color .15s ease-out, border-color .15s ease-out;
   }
-  .time-btn:hover { color:var(--fg-2); }
-  .time-btn.active { color:var(--fg); border-bottom-color:var(--accent); }
+  .time-btn:hover { color:var(--fg); background:var(--surface-2); border-color:#2a2c31; }
+  .time-btn.active { background:var(--accent); border-color:var(--accent); color:var(--accent-fg); }
 
   /* === Chart grid + cards === */
   .charts-grid { display:grid; grid-template-columns:1fr 1fr; gap:var(--s-2); padding:0 var(--s-5) var(--s-5); }
@@ -159,8 +161,8 @@
   .chart-card:hover { background:var(--surface-2); }
   .chart-card.full { grid-column:1/-1; }
   .chart-card h3 {
-    font-size:11px; font-weight:500; color:var(--fg-2);
-    text-transform:uppercase; letter-spacing:0.06em;
+    font-size:16px; font-weight:590; color:var(--fg);
+    letter-spacing:-0.011em; line-height:1.4;
     padding-bottom:var(--s-2); margin-bottom:var(--s-2);
     border-bottom:1px solid var(--line-soft);
   }
@@ -272,7 +274,7 @@
   /* === RWD: mobile-first cascade === */
   @media (max-width: 600px) {
     body { font-size: 15px; }
-    .symbol-bar { padding: var(--s-3) var(--s-3) var(--s-1); gap: 2px; }
+    .symbol-bar { padding: var(--s-3) var(--s-3) var(--s-1); gap: var(--s-1); }
     .sym-btn { padding: var(--s-2); }
     .sym-btn .sym-name { font-size: 12px; }
     .sym-btn .sym-price { font-size: 10px; }
@@ -284,14 +286,14 @@
     .stat-pill .value { font-size: 13px; }
     .stat-pill .label { font-size: 9px; }
     .refresh-bar { padding: 0 var(--s-3) var(--s-2); }
-    .time-selector { padding: 0 var(--s-3) var(--s-3); gap: var(--s-3); flex-wrap: wrap; }
-    .time-btn { padding: var(--s-2) 2px; min-height: 36px; flex: 1 1 calc(25% - 12px); text-align:center; }
+    .time-selector { padding: 0 var(--s-3) var(--s-3); gap: var(--s-1); flex-wrap: wrap; }
+    .time-btn { padding: var(--s-2) 2px; min-height: 36px; flex: 1 1 calc(25% - 4px); text-align:center; }
     .charts-grid { padding: 0 var(--s-3) var(--s-4); gap: var(--s-2); }
     .charts-grid > * { min-width: 0; }
     .chart-card { padding: var(--s-3); min-height: auto; min-width: 0; overflow: hidden; }
     .chart-container { max-width: 100%; height: 220px; }
     .chart-container.tall { height: 280px; }
-    .chart-card h3 { font-size: 11px; }
+    .chart-card h3 { font-size: 14px; }
     .chart-card .desc { font-size: 11px; }
     .info-section { margin: 0 var(--s-3) var(--s-5); padding: var(--s-4); }
     .info-section h2 { font-size: 17px; }
@@ -326,7 +328,7 @@
   @media (max-width: 400px) {
     .header .price { font-size: 22px; }
     .header h1 { font-size: 16px; }
-    .time-btn { flex: 1 1 calc(33.333% - 8px); }
+    .time-btn { flex: 1 1 calc(33.333% - 4px); }
     .chart-container { height: 200px; }
     .chart-container.tall { height: 260px; }
     .stat-pill .value { font-size: 12px; }
@@ -393,6 +395,14 @@ async function fetchData(h){
 }
 
 function fmt(v,d=2){ if(v==null||v==='')return'—'; const n=Number(v); return isNaN(n)?v:n.toFixed(d); }
+function fmtCompact(v){
+  const n=Number(v); if(!isFinite(n)) return '—';
+  const a=Math.abs(n);
+  if(a>=1e9) return (n/1e9).toFixed(2)+'B';
+  if(a>=1e6) return (n/1e6).toFixed(2)+'M';
+  if(a>=1e3) return (n/1e3).toFixed(2)+'K';
+  return n.toFixed(2);
+}
 function timeAgo(tsStr){
   // tsStr like "2026-04-01 16:51" in UTC+8
   const d=new Date(tsStr.replace(' ','T')+':00+08:00');
@@ -540,13 +550,13 @@ function renderCharts(data){
     const s=c1.addAreaSeries({lineColor:CHART.bull,topColor:CHART.bullArea25,bottomColor:CHART.bullArea02,lineWidth:2,priceScaleId:'left'});
     s.setData(sd1);
     c1.addLineSeries({color:CHART.amber,lineWidth:1.5,lineStyle:2,priceScaleId:'right'}).setData(S('oi_usdt'));
-    c1.addLineSeries({color:CHART.violet,lineWidth:1.5,lineStyle:0,priceScaleId:'oi_coin',visible:true}).setData(S('oi_coin'));
-    c1.applyOptions({leftPriceScale:{visible:true,borderColor:CHART.line},rightPriceScale:{visible:true,borderColor:CHART.line}});
+    c1.addLineSeries({color:CHART.violet,lineWidth:1.5,lineStyle:0,priceScaleId:'oi_coin',visible:true,priceFormat:{type:'custom',formatter:fmtCompact,minMove:0.01}}).setData(S('oi_coin'));
+    c1.applyOptions({leftPriceScale:{visible:true,borderColor:CHART.line,minimumWidth:1},rightPriceScale:{visible:false}});
     c1.timeScale().fitContent();
     reg('price',c1,'chart-price',[
       {key:'price',label:'Price',fmt:v=>`$${fmtPrice(v)}`,color:CHART.bull},
       {key:'oi_usdt',label:'OI($)',fmt:v=>`$${fmt(v)}M`,color:CHART.amber},
-      {key:'oi_coin',label:'OI(Coin)',fmt:v=>`${fmt(v,0)}`,color:CHART.violet},
+      {key:'oi_coin',label:'OI(Coin)',fmt:fmtCompact,color:CHART.violet},
       {key:'volume_24h',label:'Vol 24h',fmt:v=>`$${fmt(v)}M`},
       {key:'funding_rate',label:'Funding',fmt:v=>`${fmt(v,4)}%`},
       {key:'price_change_pct',label:'24h Chg',fmt:v=>`${Number(v)>=0?'+':''}${fmt(v,2)}%`},
