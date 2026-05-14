@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Money Dashboard · v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..700&family=Onest:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root {
+    /* Surfaces — warm-neutral charcoal (OKLCH hue 50, very low chroma) */
+    --bg:        oklch(0.145 0.004 50);
+    --surface:   oklch(0.185 0.005 50);
+    --surface-2: oklch(0.225 0.006 50);
+    --line:      oklch(0.285 0.007 50);
+    --line-soft: oklch(0.215 0.005 50);
+    /* Text — warm-neutral 3-tier */
+    --fg:    oklch(0.955 0.004 50);
+    --fg-2:  oklch(0.74 0.006 50);
+    --fg-3:  oklch(0.58 0.008 50);
+    /* Accent — warm coral, used sparingly */
+    --accent:    oklch(0.73 0.17 30);
+    --accent-fg: oklch(0.16 0.005 30);
+    /* Chart series — OKLCH muted family (chroma 0.10–0.16) */
+    --bull:   oklch(0.72 0.13 158);
+    --bear:   oklch(0.67 0.16 22);
+    --blue:   oklch(0.68 0.12 250);
+    --cyan:   oklch(0.76 0.10 200);
+    --violet: oklch(0.66 0.10 305);
+    --amber:  oklch(0.80 0.10 75);
+    --bull-fill: oklch(0.72 0.13 158 / 0.20);
+    --bear-fill: oklch(0.67 0.16 22 / 0.20);
+    /* Type — display + body + mono */
+    --font-display: 'Bricolage Grotesque', 'Onest', system-ui, sans-serif;
+    --font-sans:    'Onest', system-ui, -apple-system, 'PingFang TC', 'Noto Sans TC', sans-serif;
+    --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    /* Spacing 4pt (semantic mapping looser than Linear) */
+    --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:24px; --s-6:32px; --s-7:48px;
+    /* Radius — slightly softer */
+    --r:8px; --r-sm:6px; --r-xs:3px;
+    /* Elevation — multi-layer soft shadow */
+    --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.25), 0 8px 32px -4px rgb(0 0 0 / 0.4);
+    --b: 1px solid var(--line);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:var(--bg); color:var(--fg);
+    font-family:var(--font-sans); font-size:14px;
+    letter-spacing:-0.005em;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1, h2, h3, h4 { font-family:var(--font-display); }
+  .pos { color:var(--bull); } .neg { color:var(--bear); }
+  .mono { font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
+
+  /* === Symbol bar === */
+  .symbol-bar { display:flex; gap:var(--s-1); padding:var(--s-4) var(--s-5) var(--s-2); flex-wrap:wrap; align-items:stretch; }
+  .sym-btn {
+    background:transparent; border:none; color:var(--fg-2);
+    padding:var(--s-2) var(--s-3); border-radius:var(--r-xs);
+    cursor:pointer; transition:background .15s ease-out, color .15s ease-out;
+    display:flex; flex-direction:column; align-items:flex-start; gap:2px;
+    position:relative; font-family:var(--font-sans);
+  }
+  .sym-btn:hover { background:var(--surface-2); color:var(--fg); }
+  .sym-btn.active { color:var(--fg); }
+  .sym-btn.active::after {
+    content:''; position:absolute; left:var(--s-3); right:var(--s-3); bottom:-2px;
+    height:2px; background:var(--accent); border-radius:1px;
+  }
+  .sym-btn .sym-name {
+    font-family:var(--font-mono); font-size:13px; font-weight:500;
+    letter-spacing:-0.01em; color:var(--fg);
+  }
+  .sym-btn .sym-price {
+    font-family:var(--font-mono); font-variant-numeric:tabular-nums;
+    font-size:11px; color:var(--fg-3);
+  }
+  .sym-btn .sym-chg { font-size:10px; font-weight:500; }
+  .sym-btn.no-data { opacity:0.35; cursor:not-allowed; }
+  .sym-btn.no-data:hover { background:transparent; color:var(--fg-2); }
+
+  /* === Header === */
+  .header { padding:var(--s-4) var(--s-5) var(--s-4); display:flex; align-items:baseline; gap:var(--s-4); flex-wrap:wrap; }
+  .header h1 {
+    font-family:var(--font-display);
+    font-size:28px; color:var(--fg);
+    font-variation-settings:'wdth' 90, 'wght' 600;
+    letter-spacing:-0.02em; line-height:1.2;
+  }
+  .header .price {
+    font-family:var(--font-mono); font-variant-numeric:tabular-nums;
+    font-size:36px; font-weight:500; letter-spacing:-0.02em;
+  }
+  .header .change {
+    font-size:14px; font-weight:500;
+    font-variant-numeric:tabular-nums;
+  }
+  .header .meta {
+    font-family:var(--font-mono); font-variant-numeric:tabular-nums;
+    color:var(--fg-3); font-size:11px;
+  }
+
+  /* === KPI stats (inline label group, no card) === */
+  .stats-bar {
+    display:flex; gap:var(--s-6); padding:0 var(--s-5) var(--s-5);
+    flex-wrap:wrap; align-items:flex-end;
+  }
+  .stat-pill {
+    display:flex; flex-direction:column; gap:4px;
+    background:transparent; border:none; padding:0;
+  }
+  .stat-pill .label {
+    color:var(--fg-3); font-size:10px; font-weight:600;
+    text-transform:uppercase; letter-spacing:0.08em; line-height:1;
+  }
+  .stat-pill .value {
+    font-family:var(--font-mono); font-variant-numeric:tabular-nums;
+    color:var(--fg); font-size:16px; font-weight:500; line-height:1.2;
+  }
+
+  /* === Refresh bar === */
+  .refresh-bar { padding:0 var(--s-5) var(--s-2); display:flex; align-items:center; gap:var(--s-2); flex-wrap:wrap; }
+  .refresh-bar .dot { width:6px; height:6px; border-radius:50%; animation:pulse 3s infinite ease-in-out; }
+  .refresh-bar .dot.ok { background:var(--bull); box-shadow:0 0 8px oklch(0.72 0.13 158 / 0.5); }
+  .refresh-bar .dot.warn { background:var(--amber); }
+  .refresh-bar .dot.stale { background:var(--bear); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .refresh-bar span {
+    color:var(--fg-3); font-size:11px;
+    font-family:var(--font-mono); font-variant-numeric:tabular-nums;
+  }
+  .refresh-bar .ago { font-weight:500; color:var(--fg-2); }
+  .refresh-bar .ago.warn { color:var(--amber); }
+  .refresh-bar .ago.stale { color:var(--bear); }
+
+  /* === Time selector (underline tabs) === */
+  .time-selector { display:flex; gap:var(--s-4); padding:0 var(--s-5) var(--s-3); border-bottom:1px solid var(--line-soft); margin-bottom:var(--s-3); }
+  .time-btn {
+    background:transparent; border:none; color:var(--fg-3);
+    padding:var(--s-2) 0 var(--s-2); cursor:pointer;
+    font-family:var(--font-mono); font-size:11px; font-weight:500;
+    letter-spacing:0.06em; text-transform:uppercase;
+    border-bottom:2px solid transparent; margin-bottom:-1px;
+    transition:color .15s ease-out, border-color .15s ease-out;
+  }
+  .time-btn:hover { color:var(--fg-2); }
+  .time-btn.active { color:var(--fg); border-bottom-color:var(--accent); }
+
+  /* === Chart grid + cards === */
+  .charts-grid { display:grid; grid-template-columns:1fr 1fr; gap:var(--s-3); padding:0 var(--s-5) var(--s-6); }
+  @media(max-width:900px){ .charts-grid{grid-template-columns:1fr;} }
+  .chart-card {
+    background:var(--surface); border:var(--b);
+    border-radius:var(--r); padding:var(--s-4);
+    min-height:300px; position:relative;
+    box-shadow:var(--shadow-card);
+    transition:background .2s ease-out, transform .2s ease-out;
+    overflow:hidden;
+  }
+  .chart-card::before {
+    content:''; position:absolute; top:0; left:0; right:0; height:1px;
+    background:linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.08) 50%, transparent 100%);
+    pointer-events:none;
+  }
+  .chart-card:hover { background:var(--surface-2); }
+  .chart-card.full { grid-column:1/-1; }
+  .chart-card h3 {
+    font-family:var(--font-sans);
+    font-size:11px; font-weight:600; color:var(--fg-2);
+    text-transform:uppercase; letter-spacing:0.08em;
+    padding-bottom:var(--s-3); margin-bottom:var(--s-3);
+    border-bottom:1px solid var(--line-soft);
+  }
+  .chart-card .desc {
+    font-size:12px; color:var(--fg-3); line-height:1.5;
+    margin-bottom:var(--s-3);
+  }
+  .chart-card .desc code {
+    font-family:var(--font-mono); font-size:11px;
+    background:var(--surface-2); padding:1px 5px;
+    border-radius:var(--r-sm); color:var(--fg-2);
+  }
+  .chart-card .desc b { color:var(--fg-2); font-weight:500; }
+
+  /* === Tooltip === */
+  .tt {
+    position:absolute; z-index:100; top:56px; left:var(--s-3);
+    background:rgb(15 16 17 / 0.96); border:1px solid var(--line);
+    border-radius:var(--r); padding:var(--s-2) var(--s-3);
+    font-size:11px; pointer-events:none;
+    backdrop-filter:blur(12px) saturate(120%);
+    -webkit-backdrop-filter:blur(12px) saturate(120%);
+    box-shadow:var(--shadow-card);
+    min-width:172px; line-height:1.5; display:none;
+  }
+  .tt .tt-time {
+    color:var(--fg-3); font-size:10px; margin-bottom:4px;
+    font-family:var(--font-mono); font-variant-numeric:tabular-nums;
+  }
+  .tt .tt-row { display:flex; justify-content:space-between; gap:var(--s-3); }
+  .tt .tt-l { color:var(--fg-3); }
+  .tt .tt-v {
+    font-family:var(--font-mono); font-variant-numeric:tabular-nums;
+    color:var(--fg); font-weight:500;
+  }
+
+  /* === Info / glossary section === */
+  .info-section {
+    margin:0 var(--s-5) var(--s-7);
+    background:var(--surface); border:var(--b);
+    border-radius:var(--r); padding:var(--s-6);
+    box-shadow:var(--shadow-card);
+    position:relative; overflow:hidden;
+  }
+  .info-section::before {
+    content:''; position:absolute; top:0; left:0; right:0; height:1px;
+    background:linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.08) 50%, transparent 100%);
+    pointer-events:none;
+  }
+  .info-section h2 {
+    font-family:var(--font-display);
+    font-size:22px; color:var(--fg);
+    font-variation-settings:'wdth' 90, 'wght' 600;
+    letter-spacing:-0.015em; line-height:1.25; margin-bottom:var(--s-2);
+  }
+  .info-section .info-sub { font-size:13px; color:var(--fg-2); margin-bottom:var(--s-5); line-height:1.55; }
+  .info-section h3 {
+    font-family:var(--font-sans);
+    font-size:11px; font-weight:600; color:var(--fg-2);
+    text-transform:uppercase; letter-spacing:0.08em;
+    margin:var(--s-5) 0 var(--s-3); line-height:1.4;
+  }
+  .info-section h3:first-of-type { margin-top:var(--s-3); }
+  .info-section p, .info-section li { font-size:14px; color:var(--fg-2); line-height:1.6; }
+  .info-section ul { padding-left:20px; }
+  .info-section table {
+    width:100%; max-width:920px; border-collapse:collapse;
+    margin:var(--s-1) 0 var(--s-2); font-size:13px;
+  }
+  .info-section th, .info-section td {
+    text-align:left; padding:var(--s-3) var(--s-3);
+    border:none; border-bottom:1px solid var(--line-soft);
+    vertical-align:top; line-height:1.55;
+  }
+  .info-section th {
+    color:var(--fg-3); font-size:10px; font-weight:600;
+    text-transform:uppercase; letter-spacing:0.08em;
+    background:transparent; padding-bottom:var(--s-2);
+  }
+  .info-section td { color:var(--fg-2); }
+  .info-section tbody tr:nth-child(even) td { background:oklch(0.205 0.006 50 / 0.5); }
+  .info-section tbody tr:last-child td { border-bottom:none; }
+  .info-section code {
+    font-family:var(--font-mono); font-size:12px;
+    background:var(--surface-2); padding:2px 6px;
+    border-radius:var(--r-sm); color:var(--fg);
+  }
+  .info-section b { color:var(--fg); font-weight:600; }
+  .info-section .warn {
+    background:oklch(0.80 0.10 75 / 0.06);
+    border:1px solid oklch(0.80 0.10 75 / 0.25);
+    border-radius:var(--r); padding:var(--s-3) var(--s-4);
+    margin-top:var(--s-4); color:oklch(0.85 0.08 75);
+    font-size:13px; line-height:1.6;
+  }
+
+  /* === Chart container === */
+  .chart-container { width:100%; height:260px; }
+  .chart-container.tall { height:340px; }
+
+  /* === Loading === */
+  .loading { display:flex; align-items:center; justify-content:center; height:100dvh; font-size:14px; color:var(--fg-3); font-family:var(--font-mono); }
+
+  /* === Card entrance (subtle stagger) === */
+  @keyframes card-in {
+    from { opacity:0; transform:translateY(4px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+  .chart-card, .info-section {
+    animation:card-in 220ms ease-out both;
+    animation-delay:calc(var(--i,0) * 30ms);
+  }
+
+  /* === Focus ring === */
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:var(--r-sm); }
+  button:focus-visible { outline-offset:3px; }
+
+  /* === RWD: mobile-first cascade === */
+  @media (max-width: 600px) {
+    body { font-size: 15px; }
+    .symbol-bar { padding: var(--s-3) var(--s-3) var(--s-1); gap: 2px; }
+    .sym-btn { padding: var(--s-2); }
+    .sym-btn .sym-name { font-size: 12px; }
+    .sym-btn .sym-price { font-size: 10px; }
+    .header { padding: var(--s-2) var(--s-3); gap: var(--s-2); }
+    .header h1 { font-size: 22px; }
+    .header .price { font-size: 28px; }
+    .header .change { font-size: 13px; }
+    .stats-bar { padding: 0 var(--s-3) var(--s-4); gap: var(--s-5); }
+    .stat-pill .value { font-size: 14px; }
+    .stat-pill .label { font-size: 9px; }
+    .refresh-bar { padding: 0 var(--s-3) var(--s-2); }
+    .time-selector { padding: 0 var(--s-3) var(--s-3); gap: var(--s-3); flex-wrap: wrap; }
+    .time-btn { padding: var(--s-2) 2px; min-height: 36px; flex: 1 1 calc(25% - 12px); text-align:center; }
+    .charts-grid { padding: 0 var(--s-3) var(--s-4); gap: var(--s-2); }
+    .charts-grid > * { min-width: 0; }
+    .chart-card { padding: var(--s-3); min-height: auto; min-width: 0; overflow: hidden; }
+    .chart-container { max-width: 100%; height: 220px; }
+    .chart-container.tall { height: 280px; }
+    .chart-card h3 { font-size: 11px; }
+    .chart-card .desc { font-size: 11px; }
+    .info-section { margin: 0 var(--s-3) var(--s-6); padding: var(--s-5); }
+    .info-section h2 { font-size: 18px; }
+    .info-section h3 { font-size: 11px; }
+    .info-section p, .info-section li { font-size: 13px; }
+    .info-section .info-sub { font-size: 12px; }
+    .info-section .warn { font-size: 12px; }
+    /* Glossary table → card layout on mobile */
+    .info-section table { display: block; max-width: 100%; font-size: 12px; }
+    .info-section thead { display: none; }
+    .info-section tbody, .info-section tr { display: block; }
+    .info-section tbody tr:nth-child(even) td { background: transparent; }
+    .info-section tr {
+      border: 1px solid var(--line); border-radius: var(--r);
+      padding: var(--s-3); margin-bottom: var(--s-2);
+      background: var(--surface-2);
+    }
+    .info-section td { display: block; padding: var(--s-1) 0; border: none; }
+    .info-section td:first-child {
+      color: var(--fg); font-weight: 600;
+      padding-bottom: var(--s-2); margin-bottom: var(--s-1);
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .info-section td:not(:first-child)::before {
+      content: attr(data-label);
+      display: block; color: var(--fg-3);
+      font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      margin-top: var(--s-2); margin-bottom: 2px;
+    }
+  }
+  @media (max-width: 400px) {
+    .header .price { font-size: 24px; }
+    .header h1 { font-size: 20px; }
+    .time-btn { flex: 1 1 calc(33.333% - 8px); }
+    .chart-container { height: 200px; }
+    .chart-container.tall { height: 260px; }
+    .stat-pill .value { font-size: 13px; }
+  }
+
+  /* === Reduced motion === */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+    .refresh-bar .dot { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div id="app"><div class="loading">Loading...</div></div>
+<script>
+let allData=[], chartReg={}, currentHours=24, syncing=false, rangeSyncing=false, timeIdx={};
+let currentSymbol='river', symbolList=[];
+
+// Chart palette — impeccable's own OKLCH-muted family.
+// Hex pre-computed because CSS tokens use oklch() which lightweight-charts can't parse.
+const CHART = {
+  bull:   '#4ba673',  // oklch(0.72 0.13 158) — forest green
+  bear:   '#d56b53',  // oklch(0.67 0.16 22)  — brick red
+  blue:   '#7f8fd2',  // oklch(0.68 0.12 250) — dusty cobalt
+  cyan:   '#6bb8c4',  // oklch(0.76 0.10 200) — soft cyan
+  violet: '#a679b8',  // oklch(0.66 0.10 305) — plum
+  amber:  '#d6a247',  // oklch(0.80 0.10 75)  — amber
+  line:   '#3f3a35',  // oklch(0.285 0.007 50) — warm-neutral line
+  fg2:    '#bdb6ac',  // oklch(0.74 0.006 50)
+  fg3:    '#928a7e',  // oklch(0.58 0.008 50)
+  grid:        'rgba(255,255,255,0.04)',
+  fgDim:       'rgba(245,240,232,0.6)',
+  bullArea25:  'rgba(75,166,115,0.25)',
+  bullArea02:  'rgba(75,166,115,0.02)',
+  bullArea45:  'rgba(75,166,115,0.40)',
+  bearArea45:  'rgba(213,107,83,0.40)',
+  cyanArea25:  'rgba(107,184,196,0.25)',
+  cyanArea02:  'rgba(107,184,196,0.02)',
+  fundingPos:  'rgba(213,107,83,0.70)',
+  fundingNeg:  'rgba(75,166,115,0.70)',
+};
+
+// Get symbol from URL or default
+const urlParams=new URLSearchParams(window.location.search);
+if(urlParams.get('symbol')) currentSymbol=urlParams.get('symbol').toLowerCase();
+
+const DATA_BASE='/data';
+const HIDDEN_SYMBOLS=new Set(['siren','lit','rave','pippin','beat','power']);
+async function fetchSymbols(){
+  const list=await (await fetch(`${DATA_BASE}/symbols.json`)).json();
+  return list.filter(s=>!HIDDEN_SYMBOLS.has(s.symbol.toLowerCase()));
+}
+async function fetchData(h){
+  const all=(await fetch(`${DATA_BASE}/${currentSymbol}/history_full.json`)).json().then(d=>d||[]);
+  const data=await all;
+  if(h>=9999||!h) return data;
+  const cutoff=Date.now()-(h*3600*1000);
+  return data.filter(d=>new Date(d.timestamp.replace(' ','T')+':00+08:00').getTime()>=cutoff);
+}
+
+function fmt(v,d=2){ if(v==null||v==='')return'—'; const n=Number(v); return isNaN(n)?v:n.toFixed(d); }
+function timeAgo(tsStr){
+  // tsStr like "2026-04-01 16:51" in UTC+8
+  const d=new Date(tsStr.replace(' ','T')+':00+08:00');
+  const now=Date.now();
+  const diff=Math.max(0,Math.floor((now-d.getTime())/1000));
+  if(diff<60) return {text:'剛剛',level:'ok'};
+  if(diff<3600) return {text:`${Math.floor(diff/60)}分鐘前`,level:diff>1200?'warn':'ok'};
+  if(diff<86400) return {text:`${Math.floor(diff/3600)}小時${Math.floor((diff%3600)/60)}分前`,level:'stale'};
+  return {text:`${Math.floor(diff/86400)}天前`,level:'stale'};
+}
+function fmtPrice(v){
+  const n=Number(v); if(isNaN(n)) return '—';
+  if(n>=1000) return n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  if(n>=1) return n.toFixed(3);
+  if(n>=0.01) return n.toFixed(4);
+  return n.toFixed(6);
+}
+function parseTime(ts){ return Math.floor(new Date(ts.replace(' ','T')+':00+08:00').getTime()/1000); }
+function buildTimeIndex(data){ timeIdx={}; data.forEach((d,i)=>{ timeIdx[parseTime(d.timestamp)]=i; }); }
+function dedup(arr){ const seen={}; return arr.filter(d=>{ if(isNaN(d.time)||seen[d.time]) return false; seen[d.time]=1; return true; }); }
+
+function renderSymbolBar(){
+  return `<div class="symbol-bar">${symbolList.map(s=>{
+    const active=s.symbol===currentSymbol?'active':'';
+    const nodata=!s.has_data?'no-data':'';
+    const priceTxt=s.price?`$${fmtPrice(s.price)}`:'';
+    const chg=s.change_pct!=null?s.change_pct:0;
+    const chgCls=chg>=0?'pos':'neg';
+    const chgTxt=s.has_data?`<span class="sym-chg ${chgCls}">${chg>=0?'+':''}${Number(chg).toFixed(2)}%</span>`:'<span class="sym-chg">no data</span>';
+    return `<button class="sym-btn ${active} ${nodata}" onclick="switchSymbol('${s.symbol}')" ${!s.has_data?'disabled':''}>
+      <span class="sym-name">${s.symbol.toUpperCase()}</span>
+      <span class="sym-price">${priceTxt}</span>
+      ${chgTxt}
+    </button>`;
+  }).join('')}</div>`;
+}
+
+function renderHeader(d){
+  const name=currentSymbol.toUpperCase();
+  const p=Number(d.price),pct=Number(d.price_change_pct),cls=pct>=0?'pos':'neg';
+  const sign=pct>=0?'+':'−';
+  return `<div class="header"><h1>${name}/USDT</h1><span class="price ${cls}">$${fmtPrice(p)}</span><span class="change ${cls}">${sign}${Math.abs(pct).toFixed(2)}%</span><span class="meta">${d.timestamp} UTC+8 · 15min</span></div>`;
+}
+function renderStats(d){
+  const pills=[
+    {l:'OI($)',v:`$${fmt(d.oi_usdt)}M`},{l:'OI(Coin)',v:`${fmt(d.oi_coin,0)}`},{l:'Funding',v:`${fmt(d.funding_rate,4)}%`},
+    {l:'Vol 24h',v:`$${fmt(d.volume_24h)}M`},
+    {l:'SM L/S',v:fmt(d.sm_ls_ratio,4),c:Number(d.sm_ls_ratio)>1?'pos':'neg'},
+    {l:'大戶 L/S',v:fmt(d.top_pos_ls_ratio,4),c:Number(d.top_pos_ls_ratio)>1?'pos':'neg'},
+    {l:'全網 L/S',v:fmt(d.global_ls_ratio,4)},
+    {l:'Taker B/S',v:fmt(d.taker_buy_sell_ratio,4)},
+  ];
+  if(d.onchain_holders) pills.push({l:'Holders',v:Number(d.onchain_holders).toLocaleString()});
+  if(d.btc_price && currentSymbol!=='btc') pills.push({l:'BTC',v:`$${Number(d.btc_price).toLocaleString()}`});
+  if(d.river_vs_btc!=null) pills.push({l:'vs BTC',v:`${Number(d.river_vs_btc)>=0?'+':''}${fmt(d.river_vs_btc,1)}%`,c:Number(d.river_vs_btc)>0?'pos':'neg'});
+  return `<div class="stats-bar">${pills.map(x=>`<div class="stat-pill"><span class="label">${x.l}</span><span class="value ${x.c||''}">${x.v}</span></div>`).join('')}</div>`;
+}
+function renderTimeSelector(){
+  const o=[{h:6,l:'6H'},{h:12,l:'12H'},{h:24,l:'1D'},{h:72,l:'3D'},{h:168,l:'7D'},{h:720,l:'30D'},{h:9999,l:'ALL'}];
+  return `<div class="time-selector">${o.map(x=>`<button class="time-btn ${x.h===currentHours?'active':''}" onclick="switchTime(${x.h})">${x.l}</button>`).join('')}</div>`;
+}
+
+function createChart(id, opts={}){
+  const el=document.getElementById(id); if(!el) return null;
+  const c=LightweightCharts.createChart(el,{
+    width:el.clientWidth, height:opts.height||260,
+    layout:{background:{type:'solid',color:'transparent'},textColor:CHART.fg3,fontSize:11,fontFamily:"'JetBrains Mono', ui-monospace, monospace"},
+    grid:{vertLines:{color:CHART.grid},horzLines:{color:CHART.grid}},
+    crosshair:{mode:LightweightCharts.CrosshairMode.Normal,vertLine:{labelVisible:true,color:CHART.fg2,width:1},horzLine:{labelVisible:true,color:CHART.fg2,width:1}},
+    rightPriceScale:{borderColor:CHART.line},
+    timeScale:{borderColor:CHART.line,timeVisible:true,secondsVisible:false},...opts,
+  });
+  new ResizeObserver(e=>{c.applyOptions({width:e[0].contentRect.width});}).observe(el);
+  return c;
+}
+
+function ttHtml(d, fields){
+  let h=`<div class="tt-time">${d.timestamp}</div>`;
+  for(const f of fields){
+    const v=d[f.key]; if(v==null) continue;
+    const s=f.color?` style="color:${f.color}"`:'';
+    h+=`<div class="tt-row"><span class="tt-l">${f.label}</span><span class="tt-v"${s}>${f.fmt?f.fmt(v):fmt(v)}</span></div>`;
+  }
+  return h;
+}
+
+function showTooltip(id, time){
+  const info=chartReg[id]; if(!info) return;
+  const tt=info.tooltipEl;
+  if(!time){ tt.style.display='none'; return; }
+  const idx=timeIdx[time];
+  if(idx==null){ tt.style.display='none'; return; }
+  tt.innerHTML=ttHtml(allData[idx], info.fields);
+  tt.style.display='block';
+}
+
+function syncAll(sourceId, time){
+  if(syncing) return;
+  syncing=true;
+  for(const [id,info] of Object.entries(chartReg)){
+    if(id!==sourceId){
+      if(time){
+        const seriesData=info.seriesDataMap&&info.seriesDataMap[time];
+        const price=seriesData!=null?seriesData:0;
+        info.chart.setCrosshairPosition(price, time, info.firstSeries);
+      } else {
+        info.chart.clearCrosshairPosition();
+      }
+    }
+    showTooltip(id, time);
+  }
+  syncing=false;
+}
+
+function reg(id, chart, containerId, fields, firstSeries, firstSeriesData){
+  const card=document.getElementById(containerId).closest('.chart-card');
+  const tt=document.createElement('div');
+  tt.className='tt';
+  card.appendChild(tt);
+  const seriesDataMap={};
+  if(firstSeriesData) firstSeriesData.forEach(d=>{ seriesDataMap[d.time]=d.value; });
+  chartReg[id]={chart, tooltipEl:tt, fields, firstSeries, seriesDataMap};
+  chart.subscribeCrosshairMove(p=>{ if(!syncing) syncAll(id, p.time||null); });
+  chart.timeScale().subscribeVisibleTimeRangeChange(range=>{
+    if(rangeSyncing||!range) return;
+    rangeSyncing=true;
+    for(const [oid,info] of Object.entries(chartReg)){
+      if(oid===id) continue;
+      try{ info.chart.timeScale().setVisibleRange(range); }catch(e){}
+    }
+    rangeSyncing=false;
+  });
+}
+
+function renderCharts(data){
+  Object.values(chartReg).forEach(c=>{try{c.chart.remove();}catch(e){}});
+  chartReg={};
+  if(!data.length) return;
+  const S=k=>{const seen={}; return data.map(d=>({time:parseTime(d.timestamp),value:Number(d[k])||0})).filter(d=>{if(isNaN(d.time)||seen[d.time]) return false; seen[d.time]=1; return true;});};
+
+  // 1 Price+OI
+  const c1=createChart('chart-price',{height:340});
+  if(c1){
+    const sd1=S('price');
+    const s=c1.addAreaSeries({lineColor:CHART.bull,topColor:CHART.bullArea25,bottomColor:CHART.bullArea02,lineWidth:2,priceScaleId:'left'});
+    s.setData(sd1);
+    c1.addLineSeries({color:CHART.amber,lineWidth:1.5,lineStyle:2,priceScaleId:'right'}).setData(S('oi_usdt'));
+    c1.addLineSeries({color:CHART.violet,lineWidth:1.5,lineStyle:0,priceScaleId:'oi_coin',visible:true}).setData(S('oi_coin'));
+    c1.applyOptions({leftPriceScale:{visible:true,borderColor:CHART.line},rightPriceScale:{visible:true,borderColor:CHART.line}});
+    c1.timeScale().fitContent();
+    reg('price',c1,'chart-price',[
+      {key:'price',label:'Price',fmt:v=>`$${fmtPrice(v)}`,color:CHART.bull},
+      {key:'oi_usdt',label:'OI($)',fmt:v=>`$${fmt(v)}M`,color:CHART.amber},
+      {key:'oi_coin',label:'OI(Coin)',fmt:v=>`${fmt(v,0)}`,color:CHART.violet},
+      {key:'volume_24h',label:'Vol 24h',fmt:v=>`$${fmt(v)}M`},
+      {key:'funding_rate',label:'Funding',fmt:v=>`${fmt(v,4)}%`},
+      {key:'price_change_pct',label:'24h Chg',fmt:v=>`${Number(v)>=0?'+':''}${fmt(v,2)}%`},
+    ],s,sd1);
+  }
+
+  // 2 L/S Ratios
+  const c2=createChart('chart-ls');
+  if(c2){
+    const sd2=S('sm_ls_ratio');
+    const s=c2.addLineSeries({color:CHART.blue,lineWidth:2}); s.setData(sd2);
+    c2.addLineSeries({color:CHART.amber,lineWidth:1.5,lineStyle:2}).setData(S('top_pos_ls_ratio'));
+    c2.addLineSeries({color:CHART.violet,lineWidth:1,lineStyle:2}).setData(S('global_ls_ratio'));
+    c2.timeScale().fitContent();
+    reg('ls',c2,'chart-ls',[
+      {key:'sm_ls_ratio',label:'SM L/S',fmt:v=>fmt(v,4),color:CHART.blue},
+      {key:'top_pos_ls_ratio',label:'Top L/S',fmt:v=>fmt(v,4),color:CHART.amber},
+      {key:'global_ls_ratio',label:'Global L/S',fmt:v=>fmt(v,4),color:CHART.violet},
+      {key:'sm_long_traders',label:'Long人數'},
+      {key:'sm_short_traders',label:'Short人數'},
+    ],s,sd2);
+  }
+
+  // 3 SM Positions
+  const c3=createChart('chart-positions');
+  if(c3){
+    const sd3=S('sm_long_pos_usdt');
+    const sd3short=(()=>{const seen={};return data.map(d=>({time:parseTime(d.timestamp),value:-(Number(d.sm_short_pos_usdt)||0)})).filter(d=>{if(isNaN(d.time)||seen[d.time])return false;seen[d.time]=1;return true;});})();
+    const s=c3.addBaselineSeries({topLineColor:CHART.bull,topFillColor1:CHART.bullArea45,topFillColor2:CHART.bullArea45,bottomLineColor:'transparent',bottomFillColor1:'transparent',bottomFillColor2:'transparent',baseValue:{type:'price',price:0},lineWidth:1.5,priceScaleId:'left'});
+    s.setData(sd3);
+    c3.addBaselineSeries({topLineColor:'transparent',topFillColor1:'transparent',topFillColor2:'transparent',bottomLineColor:CHART.bear,bottomFillColor1:CHART.bearArea45,bottomFillColor2:CHART.bearArea45,baseValue:{type:'price',price:0},lineWidth:1.5,priceScaleId:'left'}).setData(sd3short);
+    c3.addLineSeries({color:CHART.fgDim,lineWidth:1.5,lineStyle:2,priceScaleId:'right'}).setData(S('sm_ls_ratio'));
+    c3.applyOptions({leftPriceScale:{visible:true,borderColor:CHART.line}});
+    c3.timeScale().fitContent();
+    reg('positions',c3,'chart-positions',[
+      {key:'sm_long_pos_usdt',label:'Long持倉',fmt:v=>`$${fmt(v)}M`,color:CHART.bull},
+      {key:'sm_short_pos_usdt',label:'Short持倉',fmt:v=>`-$${fmt(v)}M`,color:CHART.bear},
+      {key:'sm_ls_ratio',label:'SM L/S',fmt:v=>fmt(v,4),color:'#fff'},
+      {key:'sm_long_avg_price',label:'Long均價',fmt:v=>`$${fmtPrice(v)}`},
+      {key:'sm_short_avg_price',label:'Short均價',fmt:v=>`$${fmtPrice(v)}`},
+    ],s,sd3);
+  }
+
+  // 4 Whales
+  const c4=createChart('chart-whales');
+  if(c4){
+    const sd4=dedup(data.map(d=>({time:parseTime(d.timestamp),value:Number(d.sm_long_whales)||0,color:CHART.bull})));
+    const s=c4.addHistogramSeries({color:CHART.bull,priceScaleId:'left'});
+    s.setData(sd4);
+    c4.addHistogramSeries({color:CHART.bear,priceScaleId:'left'}).setData(dedup(data.map(d=>({time:parseTime(d.timestamp),value:-(Number(d.sm_short_whales)||0),color:CHART.bear}))));
+    c4.applyOptions({leftPriceScale:{visible:true,borderColor:CHART.line}});
+    c4.timeScale().fitContent();
+    reg('whales',c4,'chart-whales',[
+      {key:'sm_long_whales',label:'Long Whales',color:CHART.bull},
+      {key:'sm_short_whales',label:'Short Whales',color:CHART.bear},
+      {key:'sm30_long_whales',label:'30m Long鯨'},
+      {key:'sm30_short_whales',label:'30m Short鯨'},
+      {key:'sm30_long_pos_usdt',label:'30m Long',fmt:v=>`$${fmt(v,1)}K`},
+      {key:'sm30_short_pos_usdt',label:'30m Short',fmt:v=>`$${fmt(v,1)}K`},
+    ],s,sd4);
+  }
+
+  // 5 Profit
+  const c5=createChart('chart-profit');
+  if(c5){
+    const sd5=S('sm_long_profit_pct');
+    const s=c5.addLineSeries({color:CHART.bull,lineWidth:2}); s.setData(sd5);
+    c5.addLineSeries({color:CHART.bear,lineWidth:2}).setData(S('sm_short_profit_pct'));
+    c5.timeScale().fitContent();
+    reg('profit',c5,'chart-profit',[
+      {key:'sm_long_profit_pct',label:'Long盈利',fmt:v=>`${fmt(v,1)}%`,color:CHART.bull},
+      {key:'sm_short_profit_pct',label:'Short盈利',fmt:v=>`${fmt(v,1)}%`,color:CHART.bear},
+    ],s,sd5);
+  }
+
+  // 6 Funding
+  const c6=createChart('chart-funding');
+  if(c6){
+    const sd6=dedup(data.map(d=>{const v=Number(d.funding_rate)||0;return{time:parseTime(d.timestamp),value:v,color:v>=0?CHART.fundingPos:CHART.fundingNeg};}));
+    const s=c6.addHistogramSeries({priceScaleId:'left'});
+    s.setData(sd6);
+    c6.applyOptions({leftPriceScale:{visible:true,borderColor:CHART.line}});
+    c6.timeScale().fitContent();
+    reg('funding',c6,'chart-funding',[
+      {key:'funding_rate',label:'Funding',fmt:v=>`${fmt(v,4)}%`},
+      {key:'taker_buy_sell_ratio',label:'Taker B/S',fmt:v=>fmt(v,4)},
+      {key:'taker_buy_vol',label:'主動買',fmt:v=>`$${fmt(v)}M`,color:CHART.bull},
+      {key:'taker_sell_vol',label:'主動賣',fmt:v=>`$${fmt(v)}M`,color:CHART.bear},
+    ],s,sd6);
+  }
+
+  // 7 Depth
+  const c7=createChart('chart-depth');
+  if(c7){
+    const sd7=dedup(data.filter(d=>d.depth_bid_total_k).map(d=>({time:parseTime(d.timestamp),value:Number(d.depth_bid_total_k)||0})));
+    const s=c7.addLineSeries({color:CHART.bull,lineWidth:1.5});
+    s.setData(sd7);
+    c7.addLineSeries({color:CHART.bear,lineWidth:1.5}).setData(dedup(data.filter(d=>d.depth_ask_total_k).map(d=>({time:parseTime(d.timestamp),value:Number(d.depth_ask_total_k)||0}))));
+    c7.timeScale().fitContent();
+    reg('depth',c7,'chart-depth',[
+      {key:'depth_bid_total_k',label:'Bid',fmt:v=>`$${fmt(v,0)}K`,color:CHART.bull},
+      {key:'depth_ask_total_k',label:'Ask',fmt:v=>`$${fmt(v,0)}K`,color:CHART.bear},
+      {key:'depth_ratio',label:'Bid/Ask',fmt:v=>`${fmt(v)}x`},
+      {key:'depth_bid_wall_price',label:'Bid牆',fmt:v=>`$${fmtPrice(v)}`},
+      {key:'depth_ask_wall_price',label:'Ask牆',fmt:v=>`$${fmtPrice(v)}`},
+    ],s,sd7);
+  }
+
+  // 8 On-chain (only show if data exists)
+  const hasOnchain=data.some(d=>d.onchain_holders);
+  const onchainCard=document.getElementById('chart-onchain');
+  if(onchainCard){
+    if(!hasOnchain){ onchainCard.closest('.chart-card').style.display='none'; }
+    else {
+      onchainCard.closest('.chart-card').style.display='';
+      const c8=createChart('chart-onchain');
+      if(c8){
+        const hd=dedup(data.filter(d=>d.onchain_holders).map(d=>({time:parseTime(d.timestamp),value:Number(d.onchain_holders)||0})));
+        const s=c8.addAreaSeries({lineColor:CHART.cyan,topColor:CHART.cyanArea25,bottomColor:CHART.cyanArea02,lineWidth:2});
+        if(hd.length>1) s.setData(hd);
+        c8.timeScale().fitContent();
+        reg('onchain',c8,'chart-onchain',[
+          {key:'onchain_holders',label:'Holders',fmt:v=>Number(v).toLocaleString(),color:CHART.cyan},
+          {key:'onchain_top10_pct',label:'Top10',fmt:v=>`${fmt(v)}%`},
+          {key:'onchain_sm_holders',label:'SM Holders'},
+          {key:'onchain_liquidity',label:'流動池',fmt:v=>`$${fmt(v)}M`},
+        ],s,hd);
+      }
+    }
+  }
+
+  // Sync initial visible range from price chart to all others, so all charts
+  // start at the same time window and stay locked together on zoom/pan.
+  const masterId=chartReg['price']?'price':Object.keys(chartReg)[0];
+  if(masterId){
+    requestAnimationFrame(()=>{
+      const range=chartReg[masterId]&&chartReg[masterId].chart.timeScale().getVisibleRange();
+      if(!range) return;
+      rangeSyncing=true;
+      for(const [oid,info] of Object.entries(chartReg)){
+        if(oid===masterId) continue;
+        try{ info.chart.timeScale().setVisibleRange(range); }catch(e){}
+      }
+      rangeSyncing=false;
+    });
+  }
+}
+
+function renderPage(data){
+  if(!data.length){document.getElementById('app').innerHTML=renderSymbolBar()+'<div class="loading" style="height:50vh">No data for '+currentSymbol.toUpperCase()+'</div>';return;}
+  const latest=data[data.length-1];
+  const ago=timeAgo(latest.timestamp);
+  document.getElementById('app').innerHTML=`
+    ${renderSymbolBar()}
+    ${renderHeader(latest)}${renderStats(latest)}
+    <div class="refresh-bar"><div class="dot ${ago.level}"></div><span>最近數據：<span class="ago ${ago.level}">${ago.text}</span> (${latest.timestamp} UTC+8) · ${data.length} pts · 數據每15分鐘收集 · 頁面每5分鐘刷新</span></div>
+    ${renderTimeSelector()}
+    <div class="charts-grid">
+      <div class="chart-card full" style="--i:0"><h3>Price &amp; Open Interest</h3><div class="desc">來源：<code>fapi/v1/ticker/24hr</code> + <code>fapi/v1/openInterest</code>｜定義：合約最新成交價 與 全市場未平倉合約名義價值（OI × Price，M USDT）</div><div id="chart-price" class="chart-container tall"></div></div>
+      <div class="chart-card full" style="--i:1"><h3>Smart Money Positions (M USDT)</h3><div class="desc">來源：幣安 Smart Money <code>bapi/futures/v1/.../smart-money/signal/overview</code> 的 <code>longTradersQty</code> × 即時價｜定義：全體「聰明錢」（幣安內部演算法篩選的高勝率交易員，入選門檻未公開）Long / Short 持倉名義價值（M USDT）</div><div id="chart-positions" class="chart-container"></div></div>
+      <div class="chart-card full" style="--i:2"><h3>Long/Short Ratios</h3><div class="desc">來源：<code>globalLongShortAccountRatio</code>（全市場帳戶比）+ <code>topLongShortPositionRatio</code>（大戶持倉比，1h）｜定義：「大戶」= 幣安官方定義的<b>持倉量前 20% 帳戶</b>（與聰明錢/鯨魚是不同集合）；圖表為這兩種多空比的對比</div><div id="chart-ls" class="chart-container"></div></div>
+      <div class="chart-card" style="--i:3"><h3>Whale Count</h3><div class="desc">來源：Smart Money <code>overview.longWhales / shortWhales</code>｜定義：聰明錢中<b>持倉規模特別大</b>的子集（聰明錢 ∩ 鯨魚）的當前 Long / Short 帳戶數；具體 USDT 門檻幣安未公開，並非全市場鯨魚</div><div id="chart-whales" class="chart-container"></div></div>
+      <div class="chart-card" style="--i:4"><h3>Profit Rate</h3><div class="desc">來源：Smart Money <code>overview.longTradersAvgEntryPrice</code> vs 即時價計算｜定義：<b>全體聰明錢</b>（非「大戶」、非「鯨魚」）Long / Short 倉位的未實現盈虧 %，公式 = (即時價 − 平均進場價) / 平均進場價</div><div id="chart-profit" class="chart-container"></div></div>
+      <div class="chart-card" style="--i:5"><h3>Funding Rate</h3><div class="desc">來源：<code>fapi/v1/fundingRate</code> + <code>futures/data/takerlongshortRatio</code>｜定義：合約資金費率（%，正=多付空）與主動成交（吃單）的買賣量比</div><div id="chart-funding" class="chart-container"></div></div>
+      <div class="chart-card" style="--i:6"><h3>Order Book Depth (K USDT)</h3><div class="desc">來源：<code>fapi/v1/depth?limit=20</code>｜定義：訂單簿前 20 檔的 Bid / Ask 名義總額（K USDT）、Bid/Ask 比值與最大買賣牆價位</div><div id="chart-depth" class="chart-container"></div></div>
+      <div class="chart-card" style="--i:7"><h3>On-chain Holders</h3><div class="desc">來源：幣安 Web3 <code>bapi/defi/v4/.../wallet/market/token/dynamic/info</code>｜定義：鏈上 token 持有人數、Top10 集中度、Smart Money 持有人、流動池規模</div><div id="chart-onchain" class="chart-container"></div></div>
+    </div>
+    <div class="info-section" style="--i:8">
+      <h2>名詞與數據定義</h2>
+      <div class="info-sub">釐清「聰明錢 / 鯨魚 / 大戶」三個容易搞混的概念，以及每張圖表的具體計算方式。</div>
+
+      <h3>三種「精英帳戶」的差別</h3>
+      <table>
+        <thead><tr><th style="width:18%">名詞</th><th style="width:42%">資料來源</th><th>幣安定義</th></tr></thead>
+        <tbody>
+          <tr><td><b>聰明錢</b><br>Smart Money / Traders</td><td data-label="資料來源"><code>smart-money/signal/overview</code> 的 <code>longTraders</code> / <code>shortTraders</code></td><td data-label="幣安定義">幣安內部演算法篩選的「高勝率交易員」群體。<b>具體入選門檻官方未公開</b>，一般理解為長期高勝率 + 高 PnL 的帳戶集合。</td></tr>
+          <tr><td><b>鯨魚</b><br>Whales</td><td data-label="資料來源">同上 <code>longWhales</code> / <code>shortWhales</code></td><td data-label="幣安定義">上述聰明錢中<b>持倉規模特別大</b>的子集（聰明錢 ∩ 鯨魚）。具體 USDT 門檻官方<b>未公開</b>。<b>不是</b>全市場鯨魚。</td></tr>
+          <tr><td><b>大戶</b><br>Top Traders</td><td data-label="資料來源"><code>topLongShortPositionRatio</code> / <code>topLongShortAccountRatio</code></td><td data-label="幣安定義">幣安官方定義：<b>合約持倉量前 20% 的帳戶</b>。純按持倉大小排，不論勝率 — 可能虧錢的大戶也算。<b>與聰明錢、鯨魚是完全不同的集合。</b></td></tr>
+        </tbody>
+      </table>
+
+      <h3>各圖表的數據定義</h3>
+      <table>
+        <thead><tr><th style="width:22%">圖表</th><th style="width:38%">API 來源</th><th>定義 / 計算方式</th></tr></thead>
+        <tbody>
+          <tr><td>Price &amp; Open Interest</td><td data-label="API 來源"><code>fapi/v1/ticker/24hr</code><br><code>fapi/v1/openInterest</code></td><td data-label="定義 / 計算方式">合約最新成交價；全市場未平倉合約名義價值（OI × Price，M USDT）。</td></tr>
+          <tr><td>Smart Money Positions</td><td data-label="API 來源"><code>smart-money/signal/overview</code></td><td data-label="定義 / 計算方式"><b>全體聰明錢</b> Long / Short 持倉的名義價值 = <code>longTradersQty</code> × 即時價（M USDT）。</td></tr>
+          <tr><td>Long/Short Ratios</td><td data-label="API 來源"><code>globalLongShortAccountRatio</code><br><code>topLongShortPositionRatio</code></td><td data-label="定義 / 計算方式">全市場帳戶數的多空比 vs <b>大戶（前 20%）</b>持倉的多空比。注意這裡的「大戶」<b>不是</b>聰明錢。</td></tr>
+          <tr><td>Whale Count</td><td data-label="API 來源"><code>overview.longWhales</code><br><code>overview.shortWhales</code></td><td data-label="定義 / 計算方式"><b>聰明錢中的鯨魚帳戶數</b>（聰明錢 ∩ 鯨魚），即聰明錢之中持倉規模特別大的那一撮。<b>不是</b>全市場鯨魚數。</td></tr>
+          <tr><td>Profit Rate</td><td data-label="API 來源"><code>overview.longTradersAvgEntryPrice</code> + 即時價</td><td data-label="定義 / 計算方式"><b>全體聰明錢</b>（非「大戶」、非「鯨魚」）Long / Short 倉位的未實現盈虧 %。<br>公式：(即時價 − 平均進場價) / 平均進場價 × 100%</td></tr>
+          <tr><td>Funding Rate</td><td data-label="API 來源"><code>fapi/v1/fundingRate</code><br><code>futures/data/takerlongshortRatio</code></td><td data-label="定義 / 計算方式">合約資金費率（%，正值代表多方付給空方）；主動成交（吃單）的買賣量比。</td></tr>
+          <tr><td>Order Book Depth</td><td data-label="API 來源"><code>fapi/v1/depth?limit=20</code></td><td data-label="定義 / 計算方式">訂單簿前 20 檔 Bid / Ask 名義總額（K USDT）、Bid/Ask 比值與最大買賣牆價位。</td></tr>
+          <tr><td>On-chain Holders</td><td data-label="API 來源">幣安 Web3 <code>wallet/market/token/dynamic/info</code></td><td data-label="定義 / 計算方式">鏈上 token 持有人數、Top10 持倉集中度、Smart Money 持有人、流動池規模（僅 BNB 等部分標的有此資料）。</td></tr>
+        </tbody>
+      </table>
+
+      <div class="warn">
+        <b>誠實聲明：</b>幣安對「聰明錢入選標準」與「鯨魚的 USDT 持倉門檻」<b>都沒有公開精確數字</b>。網路上流傳的具體門檻（例如「持倉 &gt; 100 BTC 算鯨魚」）皆為民間推測，不可作為交易依據。本站只能依官方有開放的欄位呈現。
+      </div>
+    </div>`;
+  buildTimeIndex(data);
+  renderCharts(data);
+}
+
+async function switchSymbol(sym){
+  currentSymbol=sym;
+  // Update URL without reload
+  const url=new URL(window.location);
+  url.searchParams.set('symbol',sym);
+  window.history.replaceState({},'',url);
+  document.title=sym.toUpperCase()+'/USDT Dashboard';
+  allData=await fetchData(currentHours);
+  renderPage(allData);
+}
+
+async function switchTime(h){
+  currentHours=h;
+  allData=await fetchData(h);
+  renderPage(allData);
+}
+
+let refreshTimer=null, agoTimer=null;
+function updateAgoDisplay(){
+  if(!allData.length) return;
+  const latest=allData[allData.length-1];
+  const ago=timeAgo(latest.timestamp);
+  const dotEl=document.querySelector('.refresh-bar .dot');
+  const agoEl=document.querySelector('.refresh-bar .ago');
+  if(dotEl){ dotEl.className='dot '+ago.level; }
+  if(agoEl){ agoEl.className='ago '+ago.level; agoEl.textContent=ago.text; }
+}
+(async()=>{
+  try{
+    symbolList=await fetchSymbols();
+    // If current symbol has no data, pick first with data
+    const cur=symbolList.find(s=>s.symbol===currentSymbol);
+    if(!cur||!cur.has_data){
+      const first=symbolList.find(s=>s.has_data);
+      if(first) currentSymbol=first.symbol;
+    }
+    document.title=currentSymbol.toUpperCase()+'/USDT Dashboard';
+    allData=await fetchData(currentHours);
+    renderPage(allData);
+    // Refresh data + symbol prices every 5min
+    refreshTimer=setInterval(async()=>{
+      symbolList=await fetchSymbols();
+      allData=await fetchData(currentHours);
+      renderPage(allData);
+    },5*60*1000);
+    // Update "ago" text every 30s
+    agoTimer=setInterval(updateAgoDisplay, 30*1000);
+  }catch(e){document.getElementById('app').innerHTML=`<div class="loading">Error: ${e.message}</div>`;}
+})();
+</script>
+</body>
+</html>
