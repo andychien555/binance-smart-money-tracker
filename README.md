@@ -60,7 +60,8 @@
 │    fetch handler (CORS-enabled JSON proxy)                     │
 │      GET /data/symbols.json                                    │
 │      GET /data/<short>/prev_row.json                           │
-│      GET /data/<short>/history_full.json                       │
+│      GET /data/<short>/days/index.json                         │
+│      GET /data/<short>/days/<date>.ndjson                      │
 │      GET /run    (manual trigger)                              │
 └────┬──────────────────────────────────────────────┬────────────┘
      │ R2 binding                                   │ outbound HTTPS
@@ -68,10 +69,10 @@
 ┌────────────────────────┐    ┌─────────────────────────────────┐
 │ R2: smart-money-data   │    │ DigitalOcean SGP1 (Singapore)   │
 │  <SYMBOL>/prev_row     │    │ 167.172.64.49                   │
-│  <SYMBOL>/history_full │    │                                 │
-│  symbols.json          │    │ Caddy (443, Let's Encrypt)      │
-│  meta.json             │    │   └─ reverse_proxy → :8787      │
-└──────────┬─────────────┘    │                                 │
+│  <SYMBOL>/days/index   │    │                                 │
+│  <SYMBOL>/days/*.ndjson│    │ Caddy (443, Let's Encrypt)      │
+│  symbols.json          │    │   └─ reverse_proxy → :8787      │
+│  meta.json             │    │                                 │
            ▲                  │ systemd: binance-proxy.service  │
            │ fetch (CORS)     │   └─ node proxy.mjs (port 8787) │
 ┌──────────┴───────────┐      └────────────────┬────────────────┘
@@ -84,8 +85,16 @@
 
 - **無後端 server / 無 GH Actions**：原本是 server cron + git push + GH Pages 讀 repo `data/`；現在改成 CF Worker cron + R2 物件儲存
 - **DO proxy 中繼**：Binance 從 2026-05-13 起對 CF edge anycast IP 回 451，所以 Worker 不直接打 Binance，改走 DO Singapore 機房（IP 信譽乾淨、Binance 200）→ Caddy HTTPS → Node proxy → Binance。詳見 [mac-proxy/README.md](mac-proxy/README.md)（資料夾名稱保留 historical reasons，內容已是 DO 版）
-- **環形緩衝**：每個 `history_full.json` 最多 3000 筆 ≈ 31 天（15 分鐘間隔）
+- **每日 NDJSON 分片儲存**：每次 cron 只 append 一筆到當日 `<SYMBOL>/days/<YYYY-MM-DD>.ndjson`（純文字 append，不 parse 全量），歷史永久保留。前端依需要的時間區間決定要讀哪幾天的分片。設計理由見下方「Worker CPU 預算」。
 - **CORS / cache**：Worker `/data/*` 路由附 `Access-Control-Allow-Origin: *` 和 `Cache-Control: public, max-age=30`
+
+### Worker CPU 預算（重要）
+
+Cloudflare Workers Free plan 對 **每次** invocation（cron `scheduled` 與 `fetch` 同等）有 **10ms CPU 上限**，超過會 `outcome: exceededCpu` 並中斷。Wall time（等 API 回應）不算 CPU，但 `JSON.parse` / `JSON.stringify` 大物件算。
+
+歷史教訓（2026-05-14）：原本 cron 每次都 `JSON.parse` ~1.8MB 的 `history_full.json` 再 `JSON.stringify` 寫回 R2，當 history 累積到 3000 筆上限後，CPU 穩定超過 10ms，cron 連續失敗 10 次。改成每日 NDJSON 分片（純文字 append，當日檔 ≤ ~60KB）後 CPU 壓到 ms 級。
+
+**未來新功能設計準則**：cron 內**避免**讀 → parse → modify → stringify → 寫回的「讀寫大物件」pattern，尤其是會隨時間增長的累積資料。改用 append-only 或 sharding。
 
 ---
 
@@ -148,6 +157,10 @@ npm run dev:local                 # = wrangler dev（純本機，不打 binance 
 ```bash
 npx wrangler r2 object get smart-money-data/symbols.json --remote --pipe | jq
 npx wrangler r2 object get smart-money-data/RIVERUSDT/prev_row.json --remote --pipe | jq
+# 列出某 symbol 有資料的日期
+npx wrangler r2 object get smart-money-data/RIVERUSDT/days/index.json --remote --pipe | jq
+# 看某日的 NDJSON（一行一筆）
+npx wrangler r2 object get smart-money-data/RIVERUSDT/days/2026-05-14.ndjson --remote --pipe | tail -5
 ```
 
 ⚠️ 一定要加 `--remote`，預設是 `--local`（撈本機 miniflare sandbox，沒 seed 過就 not found）。

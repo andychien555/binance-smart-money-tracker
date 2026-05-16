@@ -23,8 +23,6 @@ const SYMBOLS_META: SymbolMeta[] = [
 	{ symbol: "SOLUSDT", short: "sol", label: "SOL/USDT" },
 ];
 
-const HISTORY_LIMIT = 3000;
-
 type Env = {
 	DATA: R2Bucket;
 	PROXY_BASE: string;
@@ -35,6 +33,8 @@ const CORS_HEADERS = {
 	"access-control-allow-origin": "*",
 	"access-control-allow-methods": "GET, HEAD, OPTIONS",
 };
+
+const NDJSON_CONTENT_TYPE = "application/x-ndjson";
 
 function proxyUrl(env: Env, originalUrl: string): string {
 	return originalUrl
@@ -84,11 +84,61 @@ function tsTaipei(now: Date): string {
 	return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())} ${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}`;
 }
 
+function dateTaipei(now: Date): string {
+	const t = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+	const pad = (n: number) => String(n).padStart(2, "0");
+	return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
+}
+
+async function appendDayShard(
+	env: Env,
+	symbol: string,
+	row: Record<string, any>,
+): Promise<void> {
+	const date = dateTaipei(new Date());
+	const dayKey = `${symbol}/days/${date}.ndjson`;
+	const indexKey = `${symbol}/days/index.json`;
+
+	const [existing, indexObj] = await Promise.all([
+		env.DATA.get(dayKey),
+		env.DATA.get(indexKey),
+	]);
+
+	const oldText = existing ? await existing.text() : "";
+	const newText = oldText + JSON.stringify(row) + "\n";
+
+	let dates: string[] = [];
+	if (indexObj) {
+		try {
+			const parsed = await indexObj.json<any>();
+			if (Array.isArray(parsed)) dates = parsed;
+		} catch {}
+	}
+
+	const writes: Promise<any>[] = [
+		env.DATA.put(dayKey, newText, {
+			httpMetadata: { contentType: NDJSON_CONTENT_TYPE },
+		}),
+	];
+
+	if (!dates.includes(date)) {
+		dates.push(date);
+		dates.sort();
+		writes.push(
+			env.DATA.put(indexKey, JSON.stringify(dates), {
+				httpMetadata: { contentType: "application/json" },
+			}),
+		);
+	}
+
+	await Promise.all(writes);
+}
+
 async function collectSymbol(
 	meta: SymbolMeta,
 	env: Env,
 	btcTicker: any | null,
-): Promise<{ row: Record<string, any>; historyCount: number }> {
+): Promise<{ row: Record<string, any> }> {
 	const { symbol } = meta;
 	const ts = tsTaipei(new Date());
 
@@ -293,31 +343,15 @@ async function collectSymbol(
 	};
 
 	const prevKey = `${symbol}/prev_row.json`;
-	const histKey = `${symbol}/history_full.json`;
-
-	let history: any[] = [];
-	const existing = await env.DATA.get(histKey);
-	if (existing) {
-		try {
-			const parsed = await existing.json<any>();
-			if (Array.isArray(parsed)) history = parsed;
-		} catch {
-			history = [];
-		}
-	}
-	history.push(row);
-	if (history.length > HISTORY_LIMIT) {
-		history = history.slice(-HISTORY_LIMIT);
-	}
-
 	const jsonOpts = { httpMetadata: { contentType: "application/json" } };
+
 	await Promise.all([
 		env.DATA.put(prevKey, JSON.stringify(row), jsonOpts),
-		env.DATA.put(histKey, JSON.stringify(history), jsonOpts),
+		appendDayShard(env, symbol, row),
 	]);
 
-	console.log(`[OK] ${symbol} $${price} @ ${ts} (${history.length} pts)`);
-	return { row, historyCount: history.length };
+	console.log(`[OK] ${symbol} $${price} @ ${ts}`);
+	return { row };
 }
 
 async function runCollection(env: Env) {
@@ -340,8 +374,8 @@ async function runCollection(env: Env) {
 				label: meta.label,
 				price: r.value.row.price,
 				change_pct: r.value.row.price_change_pct,
+				sm_ls_ratio: r.value.row.sm_ls_ratio,
 				has_data: true,
-				history_count: r.value.historyCount,
 				last_ts: r.value.row.timestamp,
 			};
 		}
@@ -383,13 +417,18 @@ function jsonResponse(body: unknown, status = 200): Response {
 	});
 }
 
-async function serveR2(env: Env, key: string): Promise<Response> {
+async function serveR2(
+	env: Env,
+	key: string,
+	contentType = "application/json",
+): Promise<Response> {
 	const obj = await env.DATA.get(key);
 	if (!obj) return jsonResponse({ error: "not found", key }, 404);
+	const ct = obj.httpMetadata?.contentType ?? contentType;
 	return new Response(obj.body, {
 		status: 200,
 		headers: {
-			"content-type": "application/json",
+			"content-type": ct,
 			"cache-control": "public, max-age=30",
 			...CORS_HEADERS,
 		},
@@ -418,6 +457,26 @@ export default {
 			return serveR2(env, "symbols.json");
 		}
 
+		const dayIdxMatch = p.match(/^\/data\/([a-z0-9]+)\/days\/index\.json$/);
+		if (dayIdxMatch) {
+			const meta = SYMBOLS_META.find((x) => x.short === dayIdxMatch[1]);
+			if (!meta) return jsonResponse({ error: "unknown symbol" }, 404);
+			return serveR2(env, `${meta.symbol}/days/index.json`);
+		}
+
+		const dayShardMatch = p.match(
+			/^\/data\/([a-z0-9]+)\/days\/(\d{4}-\d{2}-\d{2})\.ndjson$/,
+		);
+		if (dayShardMatch) {
+			const meta = SYMBOLS_META.find((x) => x.short === dayShardMatch[1]);
+			if (!meta) return jsonResponse({ error: "unknown symbol" }, 404);
+			return serveR2(
+				env,
+				`${meta.symbol}/days/${dayShardMatch[2]}.ndjson`,
+				NDJSON_CONTENT_TYPE,
+			);
+		}
+
 		const m = p.match(/^\/data\/([a-z0-9]+)\/(history_full|prev_row)\.json$/);
 		if (m) {
 			const meta = SYMBOLS_META.find((x) => x.short === m[1]);
@@ -430,7 +489,9 @@ export default {
 				"GET /run                              trigger collection now\n" +
 				"GET /data/symbols.json                list of symbols\n" +
 				"GET /data/<short>/prev_row.json       latest row\n" +
-				"GET /data/<short>/history_full.json   ring buffer (up to 3000)\n\n" +
+				"GET /data/<short>/days/index.json     list of available dates\n" +
+				"GET /data/<short>/days/<date>.ndjson  daily shard, one row per line\n" +
+				"GET /data/<short>/history_full.json   (legacy, stale fallback)\n\n" +
 				"symbols: " +
 				SYMBOLS_META.map((m) => m.short).join(", "),
 			{ headers: { "content-type": "text/plain", ...CORS_HEADERS } },

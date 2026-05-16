@@ -18,8 +18,8 @@
     --line-soft: #1a1b1d;
     /* Text — Linear 3-tier grey */
     --fg:    #f7f8f8;
-    --fg-2:  #8a8f98;
-    --fg-3:  #62666d;
+    --fg-2:  #b4b8c0;
+    --fg-3:  #8b8f97;
     /* Accent — Neon Lime, used sparingly */
     --accent:    #e4f222;
     --accent-fg: #08090a;
@@ -54,33 +54,72 @@
   .pos { color:var(--bull); } .neg { color:var(--bear); }
   .mono { font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
 
-  /* === Symbol bar === */
-  .symbol-bar { display:flex; gap:var(--s-2); padding:var(--s-4) var(--s-5) var(--s-2); flex-wrap:wrap; align-items:stretch; }
+  /* === Symbol bar (mobile-first: top tabs) === */
+  .app-layout { display:block; }
+  .symbol-bar { display:grid; grid-template-columns:repeat(2, 1fr); gap:var(--s-2); padding:var(--s-4) var(--s-5) var(--s-2); align-items:stretch; }
   .sym-btn {
     background:var(--surface); border:1px solid var(--line); color:var(--fg-2);
-    padding:var(--s-2) var(--s-3); border-radius:var(--r-sm);
-    cursor:pointer; transition:background .15s ease-out, color .15s ease-out, border-color .15s ease-out;
-    display:flex; flex-direction:column; align-items:flex-start; gap:2px;
-    font-family:var(--font-sans);
+    padding:var(--s-3); border-radius:var(--r);
+    cursor:pointer; transition:background .15s ease-out, border-color .15s ease-out;
+    display:flex; flex-direction:column; align-items:stretch; gap:var(--s-3);
+    font-family:var(--font-sans); text-align:left;
   }
-  .sym-btn:hover { background:var(--surface-2); color:var(--fg); border-color:#2a2c31; }
-  .sym-btn.active {
-    background:var(--accent); border-color:var(--accent); color:var(--accent-fg);
-  }
-  .sym-btn.active .sym-name,
-  .sym-btn.active .sym-price,
-  .sym-btn.active .sym-chg { color:var(--accent-fg); }
+  .sym-btn:hover { background:var(--surface-2); border-color:#2a2c31; }
+  .sym-btn.active { border-color:var(--accent); }
   .sym-btn .sym-name {
-    font-family:var(--font-mono); font-size:13px; font-weight:500;
-    letter-spacing:-0.01em; color:var(--fg);
+    font-family:var(--font-sans); font-weight:600;
+    font-size:20px; line-height:1; letter-spacing:-0.022em;
+    color:var(--fg);
   }
-  .sym-btn .sym-price {
+  .sym-btn .sym-sec { display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .sym-btn .sym-sec-label {
+    color:var(--fg-3); font-size:12px; font-weight:500;
+    letter-spacing:0.01em; line-height:1.2;
+  }
+  .sym-btn .sym-sec-row {
+    display:flex; align-items:baseline; gap:6px; flex-wrap:wrap;
+  }
+  .sym-btn .sym-sec-val {
     font-family:var(--font-mono); font-variant-numeric:tabular-nums;
-    font-size:11px; color:var(--fg-3);
+    font-size:16px; font-weight:500; line-height:1.1;
+    color:var(--fg); letter-spacing:-0.01em;
   }
-  .sym-btn .sym-chg { font-size:10px; font-weight:500; }
+  .sym-btn .sym-sec-val.pos { color:var(--bull); }
+  .sym-btn .sym-sec-val.neg { color:var(--bear); }
+  .sym-btn .sym-sec-chg {
+    font-family:var(--font-mono); font-variant-numeric:tabular-nums;
+    font-size:14px; font-weight:500; color:var(--fg-3);
+  }
+  .sym-btn .sym-sec-chg.pos { color:var(--bull); }
+  .sym-btn .sym-sec-chg.neg { color:var(--bear); }
   .sym-btn.no-data { opacity:0.35; cursor:not-allowed; }
-  .sym-btn.no-data:hover { background:var(--surface); color:var(--fg-2); border-color:var(--line); }
+  .sym-btn.no-data:hover { background:var(--surface); border-color:var(--line); }
+
+  /* === Desktop sidebar (≥ 768px) === */
+  @media (min-width: 768px) {
+    .app-layout {
+      display:grid;
+      grid-template-columns: 260px 1fr;
+      align-items:start;
+    }
+    .symbol-bar {
+      display:flex; flex-direction:column; flex-wrap:nowrap;
+      gap:var(--s-3);
+      padding:var(--s-4) var(--s-3) var(--s-4) var(--s-4);
+      position:sticky; top:0;
+      min-height:100dvh; max-height:100dvh; overflow-y:auto;
+      border-right:1px solid var(--line);
+    }
+    .symbol-bar .sym-btn {
+      width:100%; padding:var(--s-4); gap:var(--s-4);
+    }
+    .symbol-bar .sym-btn .sym-name { font-size:20px; line-height:1; }
+    .symbol-bar .sym-btn .sym-sec { gap:6px; }
+    .symbol-bar .sym-btn .sym-sec-label { font-size:12px; }
+    .symbol-bar .sym-btn .sym-sec-val { font-size:24px; }
+    .symbol-bar .sym-btn .sym-sec-chg { font-size:13px; }
+    .main-content { min-width:0; }
+  }
 
   /* === Header === */
   .header { padding:var(--s-3) var(--s-5) var(--s-3); display:flex; align-items:baseline; gap:var(--s-4); flex-wrap:wrap; }
@@ -101,23 +140,32 @@
     color:var(--fg-3); font-size:11px;
   }
 
-  /* === KPI stats (inline label group, no card) === */
-  .stats-bar {
-    display:flex; gap:var(--s-5); padding:0 var(--s-5) var(--s-4);
-    flex-wrap:wrap; align-items:flex-end;
+  /* === KPI cards (under time tabs, with window-relative change%) === */
+  .stats-cards {
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));
+    gap:var(--s-3); padding:0 var(--s-5) var(--s-5);
   }
-  .stat-pill {
-    display:flex; flex-direction:column; gap:2px;
-    background:transparent; border:none; padding:0;
+  .stat-card {
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--r-md);
+    padding:var(--s-3) var(--s-4);
+    display:flex; flex-direction:column; gap:6px; min-width:0;
   }
-  .stat-pill .label {
-    color:var(--fg-3); font-size:10px; font-weight:500;
+  .stat-card .label {
+    color:var(--fg-3); font-size:11px; font-weight:500;
     text-transform:uppercase; letter-spacing:0.06em; line-height:1;
   }
-  .stat-pill .value {
+  .stat-card .value {
     font-family:var(--font-mono); font-variant-numeric:tabular-nums;
-    color:var(--fg); font-size:14px; font-weight:500; line-height:1.2;
+    color:var(--fg); font-size:22px; font-weight:500; line-height:1.15;
   }
+  .stat-card .change {
+    font-family:var(--font-mono); font-variant-numeric:tabular-nums;
+    font-size:11px; line-height:1; color:var(--fg-3);
+  }
+  .stat-card .value.pos  { color:var(--bull); }
+  .stat-card .value.neg  { color:var(--bear); }
+  .stat-card .change.pos { color:var(--bull); }
+  .stat-card .change.neg { color:var(--bear); }
 
   /* === Refresh bar === */
   .refresh-bar { padding:0 var(--s-5) var(--s-2); display:flex; align-items:center; gap:var(--s-2); flex-wrap:wrap; }
@@ -140,7 +188,7 @@
     flex:1;
     background:var(--surface); border:1px solid var(--line); color:var(--fg-2);
     padding:var(--s-2) var(--s-3); cursor:pointer;
-    font-family:var(--font-mono); font-size:11px; font-weight:500;
+    font-family:var(--font-mono); font-size:16px; font-weight:500;
     letter-spacing:0.06em; text-transform:uppercase;
     border-radius:var(--r-sm); text-align:center;
     transition:background .15s ease-out, color .15s ease-out, border-color .15s ease-out;
@@ -256,6 +304,25 @@
 
   /* === Loading === */
   .loading { display:flex; align-items:center; justify-content:center; height:100dvh; font-size:14px; color:var(--fg-3); font-family:var(--font-mono); }
+  .loader, .loader:before, .loader:after {
+    border-radius:50%; width:2.5em; height:2.5em;
+    animation-fill-mode:both;
+    animation:bblFadInOut 1.8s infinite ease-in-out;
+  }
+  .loader {
+    color:var(--accent);
+    font-size:7px;
+    position:relative; text-indent:-9999em;
+    transform:translateZ(0);
+    animation-delay:-0.16s;
+  }
+  .loader:before, .loader:after { content:''; position:absolute; top:0; }
+  .loader:before { left:-3.5em; animation-delay:-0.32s; }
+  .loader:after  { left:3.5em; }
+  @keyframes bblFadInOut {
+    0%, 80%, 100% { box-shadow:0 2.5em 0 -1.3em; }
+    40%           { box-shadow:0 2.5em 0 0; }
+  }
 
   /* === Card entrance (subtle stagger) === */
   @keyframes card-in {
@@ -282,9 +349,10 @@
     .header h1 { font-size: 18px; }
     .header .price { font-size: 24px; }
     .header .change { font-size: 13px; }
-    .stats-bar { padding: 0 var(--s-3) var(--s-3); gap: var(--s-4); }
-    .stat-pill .value { font-size: 13px; }
-    .stat-pill .label { font-size: 9px; }
+    .stats-cards { grid-template-columns: repeat(2, 1fr); padding: 0 var(--s-3) var(--s-4); gap: var(--s-2); }
+    .stat-card { padding: var(--s-2) var(--s-3); gap: 4px; }
+    .stat-card .value { font-size: 18px; }
+    .stat-card .label { font-size: 10px; }
     .refresh-bar { padding: 0 var(--s-3) var(--s-2); }
     .time-selector { padding: 0 var(--s-3) var(--s-3); gap: var(--s-1); flex-wrap: wrap; }
     .time-btn { padding: var(--s-2) 2px; min-height: 36px; flex: 1 1 calc(25% - 4px); text-align:center; }
@@ -331,7 +399,6 @@
     .time-btn { flex: 1 1 calc(33.333% - 4px); }
     .chart-container { height: 200px; }
     .chart-container.tall { height: 260px; }
-    .stat-pill .value { font-size: 12px; }
   }
 
   /* === Reduced motion === */
@@ -346,10 +413,10 @@
 </style>
 </head>
 <body>
-<div id="app"><div class="loading">Loading...</div></div>
+<div id="app"><div class="loading"><span class="loader" role="status" aria-label="Loading"></span></div></div>
 <script>
 let allData=[], chartReg={}, currentHours=24, syncing=false, rangeSyncing=false, timeIdx={};
-let currentSymbol='river', symbolList=[];
+let currentSymbol='btc', symbolList=[];
 
 // Chart palette — sourced from :root CSS tokens (Linear-aligned).
 // LightweightCharts can't read CSS vars, so we resolve once at boot.
@@ -382,13 +449,63 @@ if(urlParams.get('symbol')) currentSymbol=urlParams.get('symbol').toLowerCase();
 
 const DATA_BASE='/data';
 const HIDDEN_SYMBOLS=new Set(['siren','lit','rave','pippin','beat','power']);
+async function fetchSymRecent(sym){
+  // Fetch last 2 days of NDJSON for sym → return {latest, prev24h}.
+  // prev24h is the row closest to (latest_ts - 24h).
+  try{
+    const idx=await (await fetch(`${DATA_BASE}/${sym}/days/index.json`)).json();
+    if(!Array.isArray(idx)||!idx.length) return null;
+    const days=idx.slice(-2);
+    const shards=await Promise.all(days.map(async d=>{
+      const txt=await (await fetch(`${DATA_BASE}/${sym}/days/${d}.ndjson`)).text();
+      return txt.split('\n').filter(Boolean).map(l=>{try{return JSON.parse(l);}catch{return null;}}).filter(Boolean);
+    }));
+    const all=shards.flat();
+    if(!all.length) return null;
+    const latest=all[all.length-1];
+    const latestTs=new Date(latest.timestamp.replace(' ','T')+':00+08:00').getTime();
+    const targetTs=latestTs-24*3600*1000;
+    let prev=null, bestDiff=Infinity;
+    for(const r of all){
+      if(r===latest) continue;
+      const ts=new Date(r.timestamp.replace(' ','T')+':00+08:00').getTime();
+      const diff=Math.abs(ts-targetTs);
+      if(diff<bestDiff){bestDiff=diff; prev=r;}
+    }
+    return {latest, prev24h:prev};
+  }catch{return null;}
+}
 async function fetchSymbols(){
   const list=await (await fetch(`${DATA_BASE}/symbols.json`)).json();
-  return list.filter(s=>!HIDDEN_SYMBOLS.has(s.symbol.toLowerCase()));
+  const filtered=list.filter(s=>!HIDDEN_SYMBOLS.has(s.symbol.toLowerCase()))
+    .sort((a,b)=>(a.symbol.toLowerCase()==='river')-(b.symbol.toLowerCase()==='river'));
+  await Promise.all(filtered.map(async s=>{
+    if(!s.has_data) return;
+    const r=await fetchSymRecent(s.symbol);
+    if(!r||!r.latest) return;
+    if(s.sm_ls_ratio==null && r.latest.sm_ls_ratio!=null) s.sm_ls_ratio=r.latest.sm_ls_ratio;
+    if(r.prev24h && r.latest.sm_ls_ratio!=null && r.prev24h.sm_ls_ratio!=null){
+      const cur=Number(r.latest.sm_ls_ratio), old=Number(r.prev24h.sm_ls_ratio);
+      if(isFinite(cur)&&isFinite(old)&&old!==0) s.sm_ls_chg_pct=(cur-old)/Math.abs(old)*100;
+    }
+  }));
+  return filtered;
 }
 async function fetchData(h){
-  const all=(await fetch(`${DATA_BASE}/${currentSymbol}/history_full.json`)).json().then(d=>d||[]);
-  const data=await all;
+  const idxRes=await fetch(`${DATA_BASE}/${currentSymbol}/days/index.json`);
+  if(!idxRes.ok) return [];
+  const allDates=await idxRes.json();
+  if(!Array.isArray(allDates)||!allDates.length) return [];
+  const dates=(h>=9999||!h)?allDates:allDates.slice(-(Math.ceil(h/24)+1));
+  const shards=await Promise.all(dates.map(async d=>{
+    const r=await fetch(`${DATA_BASE}/${currentSymbol}/days/${d}.ndjson`);
+    if(!r.ok) return [];
+    const text=await r.text();
+    return text.split('\n').filter(Boolean).map(line=>{
+      try{return JSON.parse(line);}catch{return null;}
+    }).filter(Boolean);
+  }));
+  const data=shards.flat();
   if(h>=9999||!h) return data;
   const cutoff=Date.now()-(h*3600*1000);
   return data.filter(d=>new Date(d.timestamp.replace(' ','T')+':00+08:00').getTime()>=cutoff);
@@ -425,19 +542,46 @@ function buildTimeIndex(data){ timeIdx={}; data.forEach((d,i)=>{ timeIdx[parseTi
 function dedup(arr){ const seen={}; return arr.filter(d=>{ if(isNaN(d.time)||seen[d.time]) return false; seen[d.time]=1; return true; }); }
 
 function renderSymbolBar(){
-  return `<div class="symbol-bar">${symbolList.map(s=>{
+  return `<aside class="symbol-bar">${symbolList.map(s=>{
     const active=s.symbol===currentSymbol?'active':'';
     const nodata=!s.has_data?'no-data':'';
-    const priceTxt=s.price?`$${fmtPrice(s.price)}`:'';
-    const chg=s.change_pct!=null?s.change_pct:0;
-    const chgCls=chg>=0?'pos':'neg';
-    const chgTxt=s.has_data?`<span class="sym-chg ${chgCls}">${chg>=0?'+':''}${Number(chg).toFixed(2)}%</span>`:'<span class="sym-chg">no data</span>';
+
+    // Price section
+    const priceTxt=s.price?`$${fmtPrice(s.price)}`:'—';
+    const chg=Number(s.change_pct);
+    const chgValid=s.has_data && isFinite(chg);
+    const chgCls=chgValid?(chg>=0?'pos':'neg'):'';
+    const chgTxt=chgValid?`${chg>=0?'+':''}${chg.toFixed(2)}%`:(s.has_data?'—':'no data');
+
+    // SM L/S section
+    const smN=s.sm_ls_ratio==null?null:Number(s.sm_ls_ratio);
+    const smValid=smN!=null && isFinite(smN);
+    const smCls=smValid?(smN>1?'pos':smN<1?'neg':''):'';
+    const smTxt=smValid?smN.toFixed(2):'—';
+
+    const smDN=s.sm_ls_chg_pct==null?null:Number(s.sm_ls_chg_pct);
+    const smDValid=smDN!=null && isFinite(smDN);
+    const smDCls=smDValid?(smDN>=0?'pos':'neg'):'';
+    const smDTxt=smDValid?`${smDN>=0?'+':''}${smDN.toFixed(1)}%`:'';
+
     return `<button class="sym-btn ${active} ${nodata}" onclick="switchSymbol('${s.symbol}')" ${!s.has_data?'disabled':''}>
-      <span class="sym-name">${s.symbol.toUpperCase()}</span>
-      <span class="sym-price">${priceTxt}</span>
-      ${chgTxt}
+      <div class="sym-name">${s.symbol.toUpperCase()}</div>
+      <div class="sym-sec">
+        <div class="sym-sec-label">Price · 24h changed</div>
+        <div class="sym-sec-row">
+          <span class="sym-sec-val">${priceTxt}</span>
+          <span class="sym-sec-chg ${chgCls}">${chgTxt}</span>
+        </div>
+      </div>
+      <div class="sym-sec">
+        <div class="sym-sec-label">SM L/S · 24h changed</div>
+        <div class="sym-sec-row">
+          <span class="sym-sec-val ${smCls}">${smTxt}</span>
+          <span class="sym-sec-chg ${smDCls}">${smDTxt}</span>
+        </div>
+      </div>
     </button>`;
-  }).join('')}</div>`;
+  }).join('')}</aside>`;
 }
 
 function renderHeader(d){
@@ -446,23 +590,38 @@ function renderHeader(d){
   const sign=pct>=0?'+':'−';
   return `<div class="header"><h1>${name}/USDT</h1><span class="price ${cls}">$${fmtPrice(p)}</span><span class="change ${cls}">${sign}${Math.abs(pct).toFixed(2)}%</span><span class="meta">${d.timestamp} UTC+8 · 15min</span></div>`;
 }
-function renderStats(d){
-  const pills=[
-    {l:'OI($)',v:`$${fmt(d.oi_usdt)}M`},{l:'OI(Coin)',v:`${fmt(d.oi_coin,0)}`},{l:'Funding',v:`${fmt(d.funding_rate,4)}%`},
-    {l:'Vol 24h',v:`$${fmt(d.volume_24h)}M`},
-    {l:'SM L/S',v:fmt(d.sm_ls_ratio,4),c:Number(d.sm_ls_ratio)>1?'pos':'neg'},
-    {l:'大戶 L/S',v:fmt(d.top_pos_ls_ratio,4),c:Number(d.top_pos_ls_ratio)>1?'pos':'neg'},
-    {l:'全網 L/S',v:fmt(d.global_ls_ratio,4)},
-    {l:'Taker B/S',v:fmt(d.taker_buy_sell_ratio,4)},
-  ];
-  if(d.onchain_holders) pills.push({l:'Holders',v:Number(d.onchain_holders).toLocaleString()});
-  if(d.btc_price && currentSymbol!=='btc') pills.push({l:'BTC',v:`$${Number(d.btc_price).toLocaleString()}`});
-  if(d.river_vs_btc!=null) pills.push({l:'vs BTC',v:`${Number(d.river_vs_btc)>=0?'+':''}${fmt(d.river_vs_btc,1)}%`,c:Number(d.river_vs_btc)>0?'pos':'neg'});
-  return `<div class="stats-bar">${pills.map(x=>`<div class="stat-pill"><span class="label">${x.l}</span><span class="value ${x.c||''}">${x.v}</span></div>`).join('')}</div>`;
-}
 function renderTimeSelector(){
   const o=[{h:6,l:'6H'},{h:12,l:'12H'},{h:24,l:'1D'},{h:72,l:'3D'},{h:168,l:'7D'},{h:720,l:'30D'},{h:9999,l:'ALL'}];
   return `<div class="time-selector">${o.map(x=>`<button class="time-btn ${x.h===currentHours?'active':''}" onclick="switchTime(${x.h})">${x.l}</button>`).join('')}</div>`;
+}
+function pctChange(rows, key){
+  if(!rows || rows.length<2) return null;
+  const cur=Number(rows[rows.length-1]?.[key]);
+  const base=Number(rows[0]?.[key]);
+  if(!isFinite(cur) || !isFinite(base) || base===0) return null;
+  return ((cur-base)/Math.abs(base))*100;
+}
+function renderStatsCards(latest, windowData){
+  const cards=[
+    {l:'OI($)',     v:`$${fmt(latest.oi_usdt)}M`,                k:'oi_usdt'},
+    {l:'OI(Coin)',  v:fmtCompact(latest.oi_coin),                k:'oi_coin'},
+    {l:'Funding',   v:`${fmt(latest.funding_rate,4)}%`,          k:'funding_rate'},
+    {l:'Vol 24h',   v:`$${fmt(latest.volume_24h)}M`,             k:'volume_24h'},
+    {l:'SM L/S',    v:fmt(latest.sm_ls_ratio,4),                 k:'sm_ls_ratio',       vc:Number(latest.sm_ls_ratio)>1?'pos':'neg'},
+    {l:'大戶 L/S',  v:fmt(latest.top_pos_ls_ratio,4),            k:'top_pos_ls_ratio',  vc:Number(latest.top_pos_ls_ratio)>1?'pos':'neg'},
+    {l:'全網 L/S',  v:fmt(latest.global_ls_ratio,4),             k:'global_ls_ratio'},
+    {l:'Taker B/S', v:fmt(latest.taker_buy_sell_ratio,4),        k:'taker_buy_sell_ratio'},
+  ];
+  return `<div class="stats-cards">${cards.map(x=>{
+    const p=pctChange(windowData, x.k);
+    let chTxt='—', chCls='';
+    if(p!=null){
+      const sign=p>0?'+':(p<0?'−':'');
+      chTxt=`${sign}${Math.abs(p).toFixed(2)}%`;
+      chCls=p>0?'pos':(p<0?'neg':'');
+    }
+    return `<div class="stat-card"><span class="label">${x.l}</span><span class="value ${x.vc||''}">${x.v}</span><span class="change ${chCls}">${chTxt}</span></div>`;
+  }).join('')}</div>`;
 }
 
 function createChart(id, opts={}){
@@ -473,7 +632,9 @@ function createChart(id, opts={}){
     grid:{vertLines:{color:CHART.grid},horzLines:{color:CHART.grid}},
     crosshair:{mode:LightweightCharts.CrosshairMode.Normal,vertLine:{labelVisible:true,color:CHART.fg2,width:1},horzLine:{labelVisible:true,color:CHART.fg2,width:1}},
     rightPriceScale:{borderColor:CHART.line},
-    timeScale:{borderColor:CHART.line,timeVisible:true,secondsVisible:false},...opts,
+    timeScale:{borderColor:CHART.line,timeVisible:true,secondsVisible:false},
+    handleScroll:false, handleScale:false,
+    ...opts,
   });
   new ResizeObserver(e=>{c.applyOptions({width:e[0].contentRect.width});}).observe(el);
   return c;
@@ -706,14 +867,17 @@ function renderCharts(data){
 }
 
 function renderPage(data){
-  if(!data.length){document.getElementById('app').innerHTML=renderSymbolBar()+'<div class="loading" style="height:50vh">No data for '+currentSymbol.toUpperCase()+'</div>';return;}
+  if(!data.length){document.getElementById('app').innerHTML=`<div class="app-layout">${renderSymbolBar()}<main class="main-content"><div class="loading" style="height:50vh">No data for ${currentSymbol.toUpperCase()}</div></main></div>`;return;}
   const latest=data[data.length-1];
   const ago=timeAgo(latest.timestamp);
   document.getElementById('app').innerHTML=`
+    <div class="app-layout">
     ${renderSymbolBar()}
-    ${renderHeader(latest)}${renderStats(latest)}
+    <main class="main-content">
+    ${renderHeader(latest)}
     <div class="refresh-bar"><div class="dot ${ago.level}"></div><span>最近數據：<span class="ago ${ago.level}">${ago.text}</span> (${latest.timestamp} UTC+8) · ${data.length} pts · 數據每15分鐘收集 · 頁面每5分鐘刷新</span></div>
     ${renderTimeSelector()}
+    ${renderStatsCards(latest, data)}
     <div class="charts-grid">
       <div class="chart-card full" style="--i:0"><h3>Price &amp; Open Interest</h3><div class="desc">來源：<code>fapi/v1/ticker/24hr</code> + <code>fapi/v1/openInterest</code>｜定義：合約最新成交價 與 全市場未平倉合約名義價值（OI × Price，M USDT）</div><div id="chart-price" class="chart-container tall"></div></div>
       <div class="chart-card full" style="--i:1"><h3>Smart Money Positions (M USDT)</h3><div class="desc">來源：幣安 Smart Money <code>bapi/futures/v1/.../smart-money/signal/overview</code> 的 <code>longTradersQty</code> × 即時價｜定義：全體「聰明錢」（幣安內部演算法篩選的高勝率交易員，入選門檻未公開）Long / Short 持倉名義價值（M USDT）</div><div id="chart-positions" class="chart-container"></div></div>
@@ -756,6 +920,8 @@ function renderPage(data){
       <div class="warn">
         <b>誠實聲明：</b>幣安對「聰明錢入選標準」與「鯨魚的 USDT 持倉門檻」<b>都沒有公開精確數字</b>。網路上流傳的具體門檻（例如「持倉 &gt; 100 BTC 算鯨魚」）皆為民間推測，不可作為交易依據。本站只能依官方有開放的欄位呈現。
       </div>
+    </div>
+    </main>
     </div>`;
   buildTimeIndex(data);
   renderCharts(data);

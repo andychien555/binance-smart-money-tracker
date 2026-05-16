@@ -403,8 +403,20 @@ async function fetchSymbols(){
   return list.filter(s=>!HIDDEN_SYMBOLS.has(s.symbol.toLowerCase()));
 }
 async function fetchData(h){
-  const all=(await fetch(`${DATA_BASE}/${currentSymbol}/history_full.json`)).json().then(d=>d||[]);
-  const data=await all;
+  const idxRes=await fetch(`${DATA_BASE}/${currentSymbol}/days/index.json`);
+  if(!idxRes.ok) return [];
+  const allDates=await idxRes.json();
+  if(!Array.isArray(allDates)||!allDates.length) return [];
+  const dates=(h>=9999||!h)?allDates:allDates.slice(-(Math.ceil(h/24)+1));
+  const shards=await Promise.all(dates.map(async d=>{
+    const r=await fetch(`${DATA_BASE}/${currentSymbol}/days/${d}.ndjson`);
+    if(!r.ok) return [];
+    const text=await r.text();
+    return text.split('\n').filter(Boolean).map(line=>{
+      try{return JSON.parse(line);}catch{return null;}
+    }).filter(Boolean);
+  }));
+  const data=shards.flat();
   if(h>=9999||!h) return data;
   const cutoff=Date.now()-(h*3600*1000);
   return data.filter(d=>new Date(d.timestamp.replace(' ','T')+':00+08:00').getTime()>=cutoff);
@@ -819,5 +831,6 @@ function updateAgoDisplay(){
   }catch(e){document.getElementById('app').innerHTML=`<div class="loading">Error: ${e.message}</div>`;}
 })();
 </script>
+<script>if(location.hostname==='localhost'||location.hostname==='127.0.0.1'){var s=document.createElement('script');s.src='https://mcp.figma.com/mcp/html-to-design/capture.js';document.body.appendChild(s);}</script>
 </body>
 </html>
