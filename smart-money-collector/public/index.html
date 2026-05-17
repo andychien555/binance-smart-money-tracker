@@ -142,8 +142,8 @@
 
   /* === KPI cards (under time tabs, with window-relative change%) === */
   .stats-cards {
-    display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));
-    gap:var(--s-3); padding:0 var(--s-5) var(--s-5);
+    display:grid; grid-template-columns:repeat(4, 1fr);
+    gap:var(--s-2); padding:0 var(--s-5) var(--s-5);
   }
   .stat-card {
     background:var(--surface); border:1px solid var(--line); border-radius:var(--r-md);
@@ -183,7 +183,7 @@
   .refresh-bar .ago.stale { color:var(--bear); }
 
   /* === Time selector (button row, evenly distributed) === */
-  .time-selector { display:flex; gap:var(--s-1); padding:0 var(--s-5) var(--s-3); margin-bottom:var(--s-3); }
+  .time-selector { display:flex; gap:var(--s-2); padding:0 var(--s-5) var(--s-3); margin-bottom:var(--s-3); }
   .time-btn {
     flex:1;
     background:var(--surface); border:1px solid var(--line); color:var(--fg-2);
@@ -265,7 +265,7 @@
     margin:var(--s-5) 0 var(--s-3); line-height:1.4;
   }
   .info-section h3:first-of-type { margin-top:var(--s-3); }
-  .info-section p, .info-section li { font-size:14px; color:var(--fg-2); line-height:1.6; }
+  .info-section p, .info-section li { font-size:16px; color:var(--fg-2); line-height:1.6; }
   .info-section ul { padding-left:20px; }
   .info-section table {
     width:100%; max-width:920px; border-collapse:collapse;
@@ -354,8 +354,8 @@
     .stat-card .value { font-size: 18px; }
     .stat-card .label { font-size: 10px; }
     .refresh-bar { padding: 0 var(--s-3) var(--s-2); }
-    .time-selector { padding: 0 var(--s-3) var(--s-3); gap: var(--s-1); flex-wrap: wrap; }
-    .time-btn { padding: var(--s-2) 2px; min-height: 36px; flex: 1 1 calc(25% - 4px); text-align:center; }
+    .time-selector { display: grid; grid-template-columns: repeat(3, 1fr); padding: 0 var(--s-3) var(--s-3); gap: var(--s-1); }
+    .time-btn { padding: var(--s-2) 2px; min-height: 36px; width: 100%; text-align:center; }
     .charts-grid { padding: 0 var(--s-3) var(--s-4); gap: var(--s-2); }
     .charts-grid > * { min-width: 0; }
     .chart-card { padding: var(--s-3); min-height: auto; min-width: 0; overflow: hidden; }
@@ -396,7 +396,6 @@
   @media (max-width: 400px) {
     .header .price { font-size: 22px; }
     .header h1 { font-size: 16px; }
-    .time-btn { flex: 1 1 calc(33.333% - 4px); }
     .chart-container { height: 200px; }
     .chart-container.tall { height: 260px; }
   }
@@ -537,6 +536,11 @@ function fmtPrice(v){
   if(n>=0.01) return n.toFixed(4);
   return n.toFixed(6);
 }
+function fmtPriceAxis(v){
+  const s=fmtPrice(v);
+  if(s==='—'||!s.includes('.')) return s;
+  return s.replace(/\.?0+$/,'');
+}
 function parseTime(ts){ return Math.floor(new Date(ts.replace(' ','T')+':00+08:00').getTime()/1000); }
 function buildTimeIndex(data){ timeIdx={}; data.forEach((d,i)=>{ timeIdx[parseTime(d.timestamp)]=i; }); }
 function dedup(arr){ const seen={}; return arr.filter(d=>{ if(isNaN(d.time)||seen[d.time]) return false; seen[d.time]=1; return true; }); }
@@ -591,7 +595,7 @@ function renderHeader(d){
   return `<div class="header"><h1>${name}/USDT</h1><span class="price ${cls}">$${fmtPrice(p)}</span><span class="change ${cls}">${sign}${Math.abs(pct).toFixed(2)}%</span><span class="meta">${d.timestamp} UTC+8 · 15min</span></div>`;
 }
 function renderTimeSelector(){
-  const o=[{h:6,l:'6H'},{h:12,l:'12H'},{h:24,l:'1D'},{h:72,l:'3D'},{h:168,l:'7D'},{h:720,l:'30D'},{h:9999,l:'ALL'}];
+  const o=[{h:6,l:'6H'},{h:12,l:'12H'},{h:24,l:'1D'},{h:72,l:'3D'},{h:168,l:'7D'},{h:9999,l:'ALL'}];
   return `<div class="time-selector">${o.map(x=>`<button class="time-btn ${x.h===currentHours?'active':''}" onclick="switchTime(${x.h})">${x.l}</button>`).join('')}</div>`;
 }
 function pctChange(rows, key){
@@ -633,6 +637,7 @@ function createChart(id, opts={}){
     crosshair:{mode:LightweightCharts.CrosshairMode.Normal,vertLine:{labelVisible:true,color:CHART.fg2,width:1},horzLine:{labelVisible:true,color:CHART.fg2,width:1}},
     rightPriceScale:{borderColor:CHART.line},
     timeScale:{borderColor:CHART.line,timeVisible:true,secondsVisible:false},
+    localization:{priceFormatter:fmtPriceAxis},
     handleScroll:false, handleScale:false,
     ...opts,
   });
@@ -705,10 +710,10 @@ function renderCharts(data){
   const S=k=>{const seen={}; return data.map(d=>({time:parseTime(d.timestamp),value:Number(d[k])||0})).filter(d=>{if(isNaN(d.time)||seen[d.time]) return false; seen[d.time]=1; return true;});};
 
   // 1 Price+OI
-  const c1=createChart('chart-price',{height:340});
+  const c1=createChart('chart-price',{height:340,localization:{}});
   if(c1){
     const sd1=S('price');
-    const s=c1.addAreaSeries({lineColor:CHART.bull,topColor:CHART.bullArea25,bottomColor:CHART.bullArea02,lineWidth:2,priceScaleId:'left'});
+    const s=c1.addAreaSeries({lineColor:CHART.bull,topColor:CHART.bullArea25,bottomColor:CHART.bullArea02,lineWidth:2,priceScaleId:'left',priceFormat:{type:'custom',formatter:fmtPriceAxis,minMove:0.01}});
     s.setData(sd1);
     c1.addLineSeries({color:CHART.amber,lineWidth:1.5,lineStyle:2,priceScaleId:'right'}).setData(S('oi_usdt'));
     c1.addLineSeries({color:CHART.violet,lineWidth:1.5,lineStyle:0,priceScaleId:'oi_coin',visible:true,priceFormat:{type:'custom',formatter:fmtCompact,minMove:0.01}}).setData(S('oi_coin'));
