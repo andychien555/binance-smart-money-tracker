@@ -447,7 +447,7 @@ const urlParams=new URLSearchParams(window.location.search);
 if(urlParams.get('symbol')) currentSymbol=urlParams.get('symbol').toLowerCase();
 
 const DATA_BASE='/data';
-const HIDDEN_SYMBOLS=new Set(['siren','lit','rave','pippin','beat','power']);
+const HIDDEN_SYMBOLS=new Set(['siren','rave','pippin','beat','power']);
 async function fetchSymRecent(sym){
   // Fetch last 2 days of NDJSON for sym → return {latest, prev24h}.
   // prev24h is the row closest to (latest_ts - 24h).
@@ -636,7 +636,7 @@ function createChart(id, opts={}){
     grid:{vertLines:{color:CHART.grid},horzLines:{color:CHART.grid}},
     crosshair:{mode:LightweightCharts.CrosshairMode.Normal,vertLine:{labelVisible:true,color:CHART.fg2,width:1},horzLine:{labelVisible:true,color:CHART.fg2,width:1}},
     rightPriceScale:{borderColor:CHART.line},
-    timeScale:{borderColor:CHART.line,timeVisible:true,secondsVisible:false},
+    timeScale:{borderColor:CHART.line,timeVisible:true,secondsVisible:false,minBarSpacing:0.01},
     localization:{priceFormatter:fmtPriceAxis},
     handleScroll:false, handleScale:false,
     ...opts,
@@ -693,7 +693,10 @@ function reg(id, chart, containerId, fields, firstSeries, firstSeriesData){
   chartReg[id]={chart, tooltipEl:tt, fields, firstSeries, seriesDataMap};
   chart.subscribeCrosshairMove(p=>{ if(!syncing) syncAll(id, p.time||null); });
   chart.timeScale().subscribeVisibleTimeRangeChange(range=>{
-    if(rangeSyncing||!range) return;
+    // Only the master ('price') chart broadcasts its window. Otherwise a chart
+    // with a sparse series (e.g. Order Book Depth, which can have only the last
+    // few points) would clamp every chart to its narrow fitContent() range.
+    if(rangeSyncing||!range||id!=='price') return;
     rangeSyncing=true;
     for(const [oid,info] of Object.entries(chartReg)){
       if(oid===id) continue;
@@ -854,20 +857,24 @@ function renderCharts(data){
     }
   }
 
-  // Sync initial visible range from price chart to all others, so all charts
-  // start at the same time window and stay locked together on zoom/pan.
-  const masterId=chartReg['price']?'price':Object.keys(chartReg)[0];
-  if(masterId){
-    requestAnimationFrame(()=>{
-      const range=chartReg[masterId]&&chartReg[masterId].chart.timeScale().getVisibleRange();
-      if(!range) return;
+  // Lock every chart to the FULL data time span, so charts whose series only
+  // cover a recent slice (e.g. Order Book Depth) don't collapse the window.
+  // Derived from the data itself, not any chart's fitContent() (which a sparse
+  // series can narrow).
+  const _times=data.map(d=>parseTime(d.timestamp)).filter(t=>!isNaN(t)).sort((a,b)=>a-b);
+  const fullRange=_times.length>=2?{from:_times[0],to:_times[_times.length-1]}:null;
+  if(fullRange){
+    // Two frames deep: each chart's own fitContent() applies on the next frame
+    // and emits a visibleRangeChange — a sparse series (e.g. depth) would fit to
+    // a sliver and broadcast that narrow window to everyone. Running our
+    // full-range set one frame later makes it the final, authoritative word.
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
       rangeSyncing=true;
       for(const [oid,info] of Object.entries(chartReg)){
-        if(oid===masterId) continue;
-        try{ info.chart.timeScale().setVisibleRange(range); }catch(e){}
+        try{ info.chart.timeScale().setVisibleRange(fullRange); }catch(e){}
       }
       rangeSyncing=false;
-    });
+    }));
   }
 }
 

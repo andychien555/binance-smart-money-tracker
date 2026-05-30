@@ -21,6 +21,7 @@ const SYMBOLS_META: SymbolMeta[] = [
 	{ symbol: "BTCUSDT", short: "btc", label: "BTC/USDT" },
 	{ symbol: "ETHUSDT", short: "eth", label: "ETH/USDT" },
 	{ symbol: "SOLUSDT", short: "sol", label: "SOL/USDT" },
+	{ symbol: "LITUSDT", short: "lit", label: "LIT/USDT" },
 ];
 
 type Env = {
