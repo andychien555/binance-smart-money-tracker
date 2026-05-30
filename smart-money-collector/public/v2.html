@@ -743,7 +743,7 @@ function renderPage(data){
   document.getElementById('app').innerHTML=`
     ${renderSymbolBar()}
     ${renderHeader(latest)}${renderStats(latest)}
-    <div class="refresh-bar"><div class="dot ${ago.level}"></div><span>最近數據：<span class="ago ${ago.level}">${ago.text}</span> (${latest.timestamp} UTC+8) · ${data.length} pts · 數據每15分鐘收集 · 頁面每5分鐘刷新</span></div>
+    <div class="refresh-bar"><div class="dot ${ago.level}"></div><span>最近數據：<span class="ago ${ago.level}">${ago.text}</span> (${latest.timestamp} UTC+8) · ${data.length} pts · 數據每15分鐘收集 · 頁面每15分鐘刷新</span></div>
     ${renderTimeSelector()}
     <div class="charts-grid">
       <div class="chart-card full" style="--i:0"><h3>Price &amp; Open Interest</h3><div class="desc">來源：<code>fapi/v1/ticker/24hr</code> + <code>fapi/v1/openInterest</code>｜定義：合約最新成交價 與 全市場未平倉合約名義價值（OI × Price，M USDT）</div><div id="chart-price" class="chart-container tall"></div></div>
@@ -836,7 +836,7 @@ function updateAgoDisplay(){
       symbolList=await fetchSymbols();
       allData=await fetchData(currentHours);
       renderPage(allData);
-    },5*60*1000);
+    },15*60*1000);
     // Update "ago" text every 30s
     agoTimer=setInterval(updateAgoDisplay, 30*1000);
   }catch(e){document.getElementById('app').innerHTML=`<div class="loading">Error: ${e.message}</div>`;}

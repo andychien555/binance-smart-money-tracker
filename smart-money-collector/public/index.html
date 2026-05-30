@@ -891,7 +891,7 @@ function renderPage(data){
     ${renderSymbolBar()}
     <main class="main-content">
     ${renderHeader(latest)}
-    <div class="refresh-bar"><div class="dot ${ago.level}"></div><span>最近數據：<span class="ago ${ago.level}">${ago.text}</span> (${latest.timestamp} UTC+8) · ${data.length} pts · 數據每15分鐘收集 · 頁面每5分鐘刷新</span></div>
+    <div class="refresh-bar"><div class="dot ${ago.level}"></div><span>最近數據：<span class="ago ${ago.level}">${ago.text}</span> (${latest.timestamp} UTC+8) · ${data.length} pts · 數據每15分鐘收集 · 頁面每15分鐘刷新</span></div>
     ${renderTimeSelector()}
     ${renderStatsCards(latest, data)}
     <div class="charts-grid">
@@ -987,7 +987,7 @@ function updateAgoDisplay(){
       symbolList=await fetchSymbols();
       allData=await fetchData(currentHours);
       renderPage(allData);
-    },5*60*1000);
+    },15*60*1000);
     // Update "ago" text every 30s
     agoTimer=setInterval(updateAgoDisplay, 30*1000);
   }catch(e){document.getElementById('app').innerHTML=`<div class="loading">Error: ${e.message}</div>`;}
