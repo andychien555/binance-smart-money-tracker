@@ -440,7 +440,11 @@ function fmtPrice(v){
   if(n>=0.01) return n.toFixed(4);
   return n.toFixed(6);
 }
-function parseTime(ts){ return Math.floor(new Date(ts.replace(' ','T')+':00+08:00').getTime()/1000); }
+// Chart time only. Timestamps are Taipei wall-clock; parse them as if UTC so
+// lightweight-charts' UTC axis displays Taipei time. Values stay self-consistent
+// across series/timeIdx/crosshair; tooltips show the original d.timestamp string.
+// (Do NOT reuse for real-time filtering — fetchData/fetchSymRecent parse +08:00.)
+function parseTime(ts){ return Math.floor(new Date(ts.replace(' ','T')+':00+00:00').getTime()/1000); }
 function buildTimeIndex(data){ timeIdx={}; data.forEach((d,i)=>{ timeIdx[parseTime(d.timestamp)]=i; }); }
 function dedup(arr){ const seen={}; return arr.filter(d=>{ if(isNaN(d.time)||seen[d.time]) return false; seen[d.time]=1; return true; }); }
 
