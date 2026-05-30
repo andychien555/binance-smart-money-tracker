@@ -21,6 +21,16 @@
 			"bucket_name": "smart-money-data"
 		}
 	],
+	// Self service-binding: lets runCollection fan each batch out to a fresh
+	// invocation (env.SELF.fetch -> /collect?batch=N), each with its own
+	// Cloudflare 50-subrequest budget. A plain fetch() to our own workers.dev
+	// hostname 404s, so the binding is required.
+	"services": [
+		{
+			"binding": "SELF",
+			"service": "smart-money-collector"
+		}
+	],
 	"assets": {
 		"directory": "./public/"
 	}

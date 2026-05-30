@@ -24,10 +24,27 @@ const SYMBOLS_META: SymbolMeta[] = [
 	{ symbol: "LITUSDT", short: "lit", label: "LIT/USDT" },
 ];
 
+// Cloudflare Workers (Free) caps each invocation at 50 fetch() subrequests.
+// Each symbol costs ~10-11 subrequests, so all symbols in one invocation blows
+// the limit (the tail-end depth/aggTrades fetches start failing). Instead the
+// cron fans out into batches, each run as its OWN sub-invocation (via a self
+// fetch to /collect?batch=N) so each gets a fresh 50-subrequest budget.
+const SELF_ORIGIN = "https://smart-money-collector.andychien-design.workers.dev";
+const BATCH_SIZE = 3; // symbols per sub-invocation (worst case ~32 subrequests)
+
+function getBatches(): SymbolMeta[][] {
+	const batches: SymbolMeta[][] = [];
+	for (let i = 0; i < SYMBOLS_META.length; i += BATCH_SIZE) {
+		batches.push(SYMBOLS_META.slice(i, i + BATCH_SIZE));
+	}
+	return batches;
+}
+
 type Env = {
 	DATA: R2Bucket;
 	PROXY_BASE: string;
 	PROXY_TOKEN: string;
+	SELF: Fetcher; // self service-binding for batch fan-out (see runCollection)
 };
 
 const CORS_HEADERS = {
@@ -355,7 +372,24 @@ async function collectSymbol(
 	return { row };
 }
 
-async function runCollection(env: Env) {
+type SummaryEntry = {
+	symbol: string;
+	label: string;
+	price: number | null;
+	change_pct: number | null;
+	sm_ls_ratio?: any;
+	has_data: boolean;
+	last_ts?: string;
+	error?: string;
+};
+
+// Collect one batch of symbols within a single invocation (its own subrequest
+// budget). Writes each symbol's day shard + prev_row; returns the summary rows.
+// Does NOT write symbols.json — the orchestrator merges all batches first.
+async function collectGroup(
+	env: Env,
+	metas: SymbolMeta[],
+): Promise<SummaryEntry[]> {
 	const btcTicker = await fetchSafe("btc-ref", () =>
 		fetchJson<any>(
 			env,
@@ -364,10 +398,10 @@ async function runCollection(env: Env) {
 	);
 
 	const results = await Promise.allSettled(
-		SYMBOLS_META.map((m) => collectSymbol(m, env, btcTicker)),
+		metas.map((m) => collectSymbol(m, env, btcTicker)),
 	);
 
-	const summary = SYMBOLS_META.map((meta, i) => {
+	return metas.map((meta, i): SummaryEntry => {
 		const r = results[i];
 		if (r.status === "fulfilled") {
 			return {
@@ -390,21 +424,54 @@ async function runCollection(env: Env) {
 			error: String(r.reason),
 		};
 	});
+}
 
-	await env.DATA.put(
-		"symbols.json",
-		JSON.stringify(summary),
-		{ httpMetadata: { contentType: "application/json" } },
+// Orchestrator (cron + /run): fan each batch out to its own sub-invocation via a
+// self fetch to /collect, so every batch gets a fresh 50-subrequest budget. Then
+// merge the returned summaries and write symbols.json once. This invocation only
+// spends one subrequest per batch.
+async function runCollection(env: Env) {
+	const batches = getBatches();
+	const perBatch = await Promise.all(
+		batches.map(async (group, i): Promise<SummaryEntry[]> => {
+			try {
+				const resp = await env.SELF.fetch(
+					`${SELF_ORIGIN}/collect?batch=${i}`,
+				);
+				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+				const body = (await resp.json()) as { summary: SummaryEntry[] };
+				return body.summary;
+			} catch (e) {
+				console.error(`[ERROR] batch ${i} fetch failed:`, e);
+				return group.map(
+					(meta): SummaryEntry => ({
+						symbol: meta.short,
+						label: meta.label,
+						price: null,
+						change_pct: null,
+						has_data: false,
+						error: String(e),
+					}),
+				);
+			}
+		}),
 	);
+
+	const summary = perBatch.flat();
+	await env.DATA.put("symbols.json", JSON.stringify(summary), {
+		httpMetadata: { contentType: "application/json" },
+	});
 	await env.DATA.put(
 		"meta.json",
 		JSON.stringify({ updated_at: new Date().toISOString() }),
 		{ httpMetadata: { contentType: "application/json" } },
 	);
 
-	const ok = results.filter((r) => r.status === "fulfilled").length;
-	console.log(`Done: ${ok}/${SYMBOLS_META.length} symbols collected`);
-	return { ok, total: SYMBOLS_META.length, summary };
+	const ok = summary.filter((s) => s.has_data).length;
+	console.log(
+		`Done: ${ok}/${summary.length} symbols collected (${batches.length} batches)`,
+	);
+	return { ok, total: summary.length, summary };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -454,6 +521,22 @@ export default {
 			return jsonResponse(result);
 		}
 
+		// One batch, run as its own invocation (fresh 50-subrequest budget).
+		// Called by runCollection's fan-out; returns the batch's summary rows.
+		if (p === "/collect") {
+			const batches = getBatches();
+			const batchIdx = Number(url.searchParams.get("batch"));
+			if (
+				!Number.isInteger(batchIdx) ||
+				batchIdx < 0 ||
+				batchIdx >= batches.length
+			) {
+				return jsonResponse({ error: "invalid batch" }, 400);
+			}
+			const summary = await collectGroup(env, batches[batchIdx]);
+			return jsonResponse({ summary });
+		}
+
 		if (p === "/data/symbols.json") {
 			return serveR2(env, "symbols.json");
 		}
@@ -487,7 +570,8 @@ export default {
 
 		return new Response(
 			"smart-money-collector\n\n" +
-				"GET /run                              trigger collection now\n" +
+				"GET /run                              trigger collection now (fans out to batches)\n" +
+				"GET /collect?batch=N                  collect one batch (internal fan-out target)\n" +
 				"GET /data/symbols.json                list of symbols\n" +
 				"GET /data/<short>/prev_row.json       latest row\n" +
 				"GET /data/<short>/days/index.json     list of available dates\n" +
