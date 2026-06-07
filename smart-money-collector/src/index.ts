@@ -22,6 +22,8 @@ const SYMBOLS_META: SymbolMeta[] = [
 	{ symbol: "ETHUSDT", short: "eth", label: "ETH/USDT" },
 	{ symbol: "SOLUSDT", short: "sol", label: "SOL/USDT" },
 	{ symbol: "LITUSDT", short: "lit", label: "LIT/USDT" },
+	{ symbol: "LABUSDT", short: "lab", label: "LAB/USDT" },
+	{ symbol: "VVVUSDT", short: "vvv", label: "VVV/USDT" },
 ];
 
 // Cloudflare Workers (Free) caps each invocation at 50 fetch() subrequests.
