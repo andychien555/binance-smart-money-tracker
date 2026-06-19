@@ -748,17 +748,24 @@ function renderCharts(data){
       {key:'oi_usdt',   label:'OI($)',    color:CHART.amber,  scale:'right', dashed:true,on:false, fmt:v=>`$${fmt(v)}M`},
       {key:'oi_coin',   label:'OI(Coin)', color:CHART.violet, scale:'oi_coin',           on:false, fmt:fmtCompact},
       {key:'sm_ls_ratio',label:'SM L/S',  color:CHART.blue,   scale:'smls',              on:true,  fmt:v=>fmt(v,4)},
-      {key:'volume_24h',label:'Vol 24h',  color:CHART.cyan,   scale:'vol',   dashed:true,on:false, fmt:v=>`$${fmt(v)}M`},
+      {key:'volume_24h',label:'Vol 24h',  color:CHART.cyan,   scale:'vol',   histogram:true,on:false,fmt:v=>`$${fmt(v)}M`},
       {key:'funding_rate',label:'Funding',color:CHART.fgDim,  scale:'funding',dashed:true,on:false, fmt:v=>`${fmt(v,4)}%`},
       {key:'price_change_pct',label:'24h Chg',color:CHART.bear,scale:'chg',  dashed:true,on:false, fmt:v=>`${Number(v)>=0?'+':''}${fmt(v,2)}%`},
     ];
     const priceSeries={};
     let firstS=null;
     for(const d of priceSeriesDefs){
-      const ser=d.area
-        ? c1.addAreaSeries({lineColor:d.color,topColor:CHART.bullArea25,bottomColor:CHART.bullArea02,lineWidth:2,priceScaleId:d.scale,visible:d.on,priceFormat:{type:'custom',formatter:fmtPriceAxis,minMove:0.01}})
-        : c1.addLineSeries({color:d.color,lineWidth:1.5,lineStyle:d.dashed?2:0,priceScaleId:d.scale,visible:d.on});
+      let ser;
+      if(d.area){
+        ser=c1.addAreaSeries({lineColor:d.color,topColor:CHART.bullArea25,bottomColor:CHART.bullArea02,lineWidth:2,priceScaleId:d.scale,visible:d.on,priceFormat:{type:'custom',formatter:fmtPriceAxis,minMove:0.01}});
+      } else if(d.histogram){
+        // Volume as bars pinned to the bottom ~22% of the pane (own overlay scale)
+        ser=c1.addHistogramSeries({color:d.color,priceScaleId:d.scale,visible:d.on,priceFormat:{type:'custom',formatter:fmtCompact,minMove:0.01}});
+      } else {
+        ser=c1.addLineSeries({color:d.color,lineWidth:1.5,lineStyle:d.dashed?2:0,priceScaleId:d.scale,visible:d.on});
+      }
       ser.setData(S(d.key));
+      if(d.histogram) ser.priceScale().applyOptions({scaleMargins:{top:0.78,bottom:0}});
       priceSeries[d.key]=ser;
       if(!firstS) firstS=ser;
     }
