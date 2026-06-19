@@ -225,6 +225,27 @@
   }
   .chart-card .desc b { color:var(--fg-2); font-weight:500; }
 
+  /* === Series toggles === */
+  .chart-toggles {
+    display:flex; flex-wrap:wrap; gap:var(--s-2);
+    margin-bottom:var(--s-3);
+  }
+  .chart-toggles label {
+    display:inline-flex; align-items:center; gap:6px;
+    font-family:var(--font-mono); font-size:11px; color:var(--fg-2);
+    padding:3px 8px; border:1px solid var(--line);
+    border-radius:var(--r-sm); cursor:pointer; user-select:none;
+    transition:background .15s ease-out, border-color .15s ease-out;
+  }
+  .chart-toggles label:hover { background:var(--surface-2); }
+  .chart-toggles input { accent-color:var(--blue); cursor:pointer; margin:0; }
+  .chart-toggles label .swatch {
+    width:9px; height:9px; border-radius:2px; flex:none;
+  }
+  .chart-toggles input:not(:checked) ~ .swatch { opacity:0.3; }
+  .chart-toggles input:not(:checked) ~ .tt-l,
+  .chart-toggles input:not(:checked) ~ span { color:var(--fg-3); }
+
   /* === Tooltip === */
   .tt {
     position:absolute; z-index:100; top:56px; left:var(--s-3);
@@ -716,24 +737,55 @@ function renderCharts(data){
   if(!data.length) return;
   const S=k=>{const seen={}; return data.map(d=>({time:parseTime(d.timestamp),value:Number(d[k])||0})).filter(d=>{if(isNaN(d.time)||seen[d.time]) return false; seen[d.time]=1; return true;});};
 
-  // 1 Price+OI
+  // 1 Price+OI — each series is toggleable via checkboxes (#price-toggles)
   const c1=createChart('chart-price',{height:340,localization:{}});
   if(c1){
     const sd1=S('price');
-    const s=c1.addAreaSeries({lineColor:CHART.bull,topColor:CHART.bullArea25,bottomColor:CHART.bullArea02,lineWidth:2,priceScaleId:'left',priceFormat:{type:'custom',formatter:fmtPriceAxis,minMove:0.01}});
-    s.setData(sd1);
-    c1.addLineSeries({color:CHART.amber,lineWidth:1.5,lineStyle:2,priceScaleId:'right'}).setData(S('oi_usdt'));
-    c1.addLineSeries({color:CHART.violet,lineWidth:1.5,lineStyle:0,priceScaleId:'oi_coin',visible:true,priceFormat:{type:'custom',formatter:fmtCompact,minMove:0.01}}).setData(S('oi_coin'));
+    // Series definitions: each gets its own overlay price-scale so differently-
+    // scaled lines (price / OI / volume / % / ratio) coexist without flattening.
+    const priceSeriesDefs=[
+      {key:'price',     label:'Price',    color:CHART.bull,   scale:'left',  area:true,  on:true,  fmt:v=>`$${fmtPrice(v)}`},
+      {key:'oi_usdt',   label:'OI($)',    color:CHART.amber,  scale:'right', dashed:true,on:false, fmt:v=>`$${fmt(v)}M`},
+      {key:'oi_coin',   label:'OI(Coin)', color:CHART.violet, scale:'oi_coin',           on:false, fmt:fmtCompact},
+      {key:'sm_ls_ratio',label:'SM L/S',  color:CHART.blue,   scale:'smls',              on:true,  fmt:v=>fmt(v,4)},
+      {key:'volume_24h',label:'Vol 24h',  color:CHART.cyan,   scale:'vol',   dashed:true,on:false, fmt:v=>`$${fmt(v)}M`},
+      {key:'funding_rate',label:'Funding',color:CHART.fgDim,  scale:'funding',dashed:true,on:false, fmt:v=>`${fmt(v,4)}%`},
+      {key:'price_change_pct',label:'24h Chg',color:CHART.bear,scale:'chg',  dashed:true,on:false, fmt:v=>`${Number(v)>=0?'+':''}${fmt(v,2)}%`},
+    ];
+    const priceSeries={};
+    let firstS=null;
+    for(const d of priceSeriesDefs){
+      const ser=d.area
+        ? c1.addAreaSeries({lineColor:d.color,topColor:CHART.bullArea25,bottomColor:CHART.bullArea02,lineWidth:2,priceScaleId:d.scale,visible:d.on,priceFormat:{type:'custom',formatter:fmtPriceAxis,minMove:0.01}})
+        : c1.addLineSeries({color:d.color,lineWidth:1.5,lineStyle:d.dashed?2:0,priceScaleId:d.scale,visible:d.on});
+      ser.setData(S(d.key));
+      priceSeries[d.key]=ser;
+      if(!firstS) firstS=ser;
+    }
     c1.applyOptions({leftPriceScale:{visible:true,borderColor:CHART.line,minimumWidth:1},rightPriceScale:{visible:false}});
     c1.timeScale().fitContent();
+    // Build toggle checkboxes
+    const tg=document.getElementById('price-toggles');
+    if(tg){
+      tg.innerHTML='';
+      for(const d of priceSeriesDefs){
+        const lbl=document.createElement('label');
+        lbl.innerHTML=`<input type="checkbox" ${d.on?'checked':''}><span class="swatch" style="background:${d.color}"></span><span>${d.label}</span>`;
+        lbl.querySelector('input').addEventListener('change',e=>{
+          priceSeries[d.key].applyOptions({visible:e.target.checked});
+        });
+        tg.appendChild(lbl);
+      }
+    }
     reg('price',c1,'chart-price',[
       {key:'price',label:'Price',fmt:v=>`$${fmtPrice(v)}`,color:CHART.bull},
       {key:'oi_usdt',label:'OI($)',fmt:v=>`$${fmt(v)}M`,color:CHART.amber},
       {key:'oi_coin',label:'OI(Coin)',fmt:fmtCompact,color:CHART.violet},
-      {key:'volume_24h',label:'Vol 24h',fmt:v=>`$${fmt(v)}M`},
+      {key:'sm_ls_ratio',label:'SM L/S',fmt:v=>fmt(v,4),color:CHART.blue},
+      {key:'volume_24h',label:'Vol 24h',fmt:v=>`$${fmt(v)}M`,color:CHART.cyan},
       {key:'funding_rate',label:'Funding',fmt:v=>`${fmt(v,4)}%`},
       {key:'price_change_pct',label:'24h Chg',fmt:v=>`${Number(v)>=0?'+':''}${fmt(v,2)}%`},
-    ],s,sd1);
+    ],firstS,sd1);
   }
 
   // 2 L/S Ratios
@@ -773,14 +825,16 @@ function renderCharts(data){
     ],s,sd3);
   }
 
-  // 4 Whales
+  // 4 Whales — line + filled area. Both counts plotted positive on one shared
+  // axis that autoscales to the data range (not anchored at 0) with tight scale
+  // margins, so small fluctuations in whale counts are clearly visible.
   const c4=createChart('chart-whales');
   if(c4){
-    const sd4=dedup(data.map(d=>({time:parseTime(d.timestamp),value:Number(d.sm_long_whales)||0,color:CHART.bull})));
-    const s=c4.addHistogramSeries({color:CHART.bull,priceScaleId:'left'});
+    const sd4=S('sm_long_whales');
+    const s=c4.addAreaSeries({lineColor:CHART.bull,topColor:CHART.bullArea25,bottomColor:CHART.bullArea02,lineWidth:2,priceScaleId:'left'});
     s.setData(sd4);
-    c4.addHistogramSeries({color:CHART.bear,priceScaleId:'left'}).setData(dedup(data.map(d=>({time:parseTime(d.timestamp),value:-(Number(d.sm_short_whales)||0),color:CHART.bear}))));
-    c4.applyOptions({leftPriceScale:{visible:true,borderColor:CHART.line}});
+    c4.addAreaSeries({lineColor:CHART.bear,topColor:'rgba(235,87,87,0.22)',bottomColor:'rgba(235,87,87,0.02)',lineWidth:2,priceScaleId:'left'}).setData(S('sm_short_whales'));
+    c4.applyOptions({leftPriceScale:{visible:true,borderColor:CHART.line,scaleMargins:{top:0.1,bottom:0.06}}});
     c4.timeScale().fitContent();
     reg('whales',c4,'chart-whales',[
       {key:'sm_long_whales',label:'Long Whales',color:CHART.bull},
@@ -895,7 +949,7 @@ function renderPage(data){
     ${renderTimeSelector()}
     ${renderStatsCards(latest, data)}
     <div class="charts-grid">
-      <div class="chart-card full" style="--i:0"><h3>Price &amp; Open Interest</h3><div class="desc">來源：<code>fapi/v1/ticker/24hr</code> + <code>fapi/v1/openInterest</code>｜定義：合約最新成交價 與 全市場未平倉合約名義價值（OI × Price，M USDT）</div><div id="chart-price" class="chart-container tall"></div></div>
+      <div class="chart-card full" style="--i:0"><h3>Price &amp; Open Interest</h3><div class="desc">來源：<code>fapi/v1/ticker/24hr</code> + <code>fapi/v1/openInterest</code>｜定義：合約最新成交價 與 全市場未平倉合約名義價值（OI × Price，M USDT）</div><div class="chart-toggles" id="price-toggles"></div><div id="chart-price" class="chart-container tall"></div></div>
       <div class="chart-card full" style="--i:1"><h3>Smart Money Positions (M USDT)</h3><div class="desc">來源：幣安 Smart Money <code>bapi/futures/v1/.../smart-money/signal/overview</code> 的 <code>longTradersQty</code> × 即時價｜定義：全體「聰明錢」（幣安內部演算法篩選的高勝率交易員，入選門檻未公開）Long / Short 持倉名義價值（M USDT）</div><div id="chart-positions" class="chart-container"></div></div>
       <div class="chart-card full" style="--i:2"><h3>Long/Short Ratios</h3><div class="desc">來源：<code>globalLongShortAccountRatio</code>（全市場帳戶比）+ <code>topLongShortPositionRatio</code>（大戶持倉比，1h）｜定義：「大戶」= 幣安官方定義的<b>持倉量前 20% 帳戶</b>（與聰明錢/鯨魚是不同集合）；圖表為這兩種多空比的對比</div><div id="chart-ls" class="chart-container"></div></div>
       <div class="chart-card" style="--i:3"><h3>Whale Count</h3><div class="desc">來源：Smart Money <code>overview.longWhales / shortWhales</code>｜定義：聰明錢中<b>持倉規模特別大</b>的子集（聰明錢 ∩ 鯨魚）的當前 Long / Short 帳戶數；具體 USDT 門檻幣安未公開，並非全市場鯨魚</div><div id="chart-whales" class="chart-container"></div></div>

@@ -84,7 +84,7 @@
 ```
 
 - **無後端 server / 無 GH Actions**：原本是 server cron + git push + GH Pages 讀 repo `data/`；現在改成 CF Worker cron + R2 物件儲存
-- **DO proxy 中繼**：Binance 從 2026-05-13 起對 CF edge anycast IP 回 451，所以 Worker 不直接打 Binance，改走 DO Singapore 機房（IP 信譽乾淨、Binance 200）→ Caddy HTTPS → Node proxy → Binance。詳見 [mac-proxy/README.md](mac-proxy/README.md)（資料夾名稱保留 historical reasons，內容已是 DO 版）
+- **DO proxy 中繼**：Binance 從 2026-05-13 起對 CF edge anycast IP 回 451，所以 Worker 不直接打 Binance，改走 DO Singapore 機房（IP 信譽乾淨、Binance 200）→ Caddy HTTPS → Node proxy → Binance。詳見 [proxy/README.md](proxy/README.md)
 - **每日 NDJSON 分片儲存**：每次 cron 只 append 一筆到當日 `<SYMBOL>/days/<YYYY-MM-DD>.ndjson`（純文字 append，不 parse 全量），歷史永久保留。前端依需要的時間區間決定要讀哪幾天的分片。設計理由見下方「Worker CPU 預算」。
 - **CORS / cache**：Worker `/data/*` 路由附 `Access-Control-Allow-Origin: *` 和 `Cache-Control: public, max-age=30`
 
@@ -109,16 +109,15 @@ Cloudflare Workers Free plan 對 **每次** invocation（cron `scheduled` 與 `f
 │   ├── wrangler.jsonc                  # cron + R2 binding + assets 設定
 │   ├── package.json
 │   └── tsconfig.json
-├── mac-proxy/                          # proxy 原始碼（現役部署在 DO，非 Mac；資料夾名稱待整理）
-│   ├── proxy.mjs                       # Node HTTP proxy（同一份在 DO /root/.openclaw/workspace/mac-proxy/）
-│   ├── start.sh / stop.sh              # （舊）Mac 啟停腳本，DO 上用 systemctl 管
-│   └── README.md                       # DO 部署 / 操作 / debug（必讀）
-├── data/                               # （舊）Python collector 留下的歷史 JSON
-├── scripts/                            # （舊）Python collector 的 shell wrapper
-└── server/                             # （舊）Flask 備用版，未啟用
+└── proxy/                              # proxy 原始碼（現役部署在 DO Singapore）
+    ├── proxy.mjs                       # Node HTTP proxy（同一份在 DO /root/.openclaw/workspace/mac-proxy/）
+    ├── start.sh / stop.sh              # 啟停腳本（DO 上用 systemctl 管）
+    └── README.md                       # DO 部署 / 操作 / debug（必讀）
 ```
 
-`.github/workflows/collect.yml`（舊 GH Actions cron）已移除，被 Worker cron 取代。`data/`、`scripts/`、`server/` 是 Python collector 時代的遺物，目前沒在用，保留當 archive。
+`.github/workflows/collect.yml`（舊 GH Actions cron）已移除，被 Worker cron 取代。舊 Python collector 時代的遺物（`data/`、`scripts/`、`server/`）已於 2026-06-19 清掉，需要時從 git history 找得回。
+
+> proxy 資料夾原名 `mac-proxy/`（proxy 早期跑在 Mac 上），2026-06-19 改名為 `proxy/`。DO VPS 上的實際路徑仍是 `/root/.openclaw/workspace/mac-proxy/`（未動線上），故下方與 proxy README 中的 DO 操作絕對路徑維持原樣。
 
 ---
 
@@ -183,7 +182,7 @@ npm run deploy                    # = wrangler deploy
 
 Deploy 會同時上傳 `src/index.ts`（Worker 邏輯）跟 `public/`（前端 assets）。Cron 自動上線，下一個 `*/15` 整點就會跑。R2 bucket `smart-money-data` 需事先建好。
 
-⚠️ Worker 依賴兩個 secret：`PROXY_BASE`（DO HTTPS URL，目前 `https://167.172.64.49.nip.io`）、`PROXY_TOKEN`（proxy 驗證密鑰）。詳見 [mac-proxy/README.md](mac-proxy/README.md)。
+⚠️ Worker 依賴兩個 secret：`PROXY_BASE`（DO HTTPS URL，目前 `https://167.172.64.49.nip.io`）、`PROXY_TOKEN`（proxy 驗證密鑰）。詳見 [proxy/README.md](proxy/README.md)。
 
 ---
 
@@ -235,4 +234,4 @@ curl https://smart-money-collector.andychien-design.workers.dev/data/symbols.jso
 - `HTTP 403` from proxy — Worker `PROXY_TOKEN` 跟 DO `.env` 的 `PROXY_SECRET` 對不上
 - `HTTP 5xx` from Binance — Binance 短暫故障，下個 cron 通常會恢復
 
-debug 步驟與恢復方式 → [mac-proxy/README.md](mac-proxy/README.md)。
+debug 步驟與恢復方式 → [proxy/README.md](proxy/README.md)。

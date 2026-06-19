@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Start the Mac proxy + Cloudflare Tunnel, then sync the tunnel URL into the
+# Start the proxy + Cloudflare Tunnel, then sync the tunnel URL into the
 # Worker's PROXY_BASE secret and redeploy. Idempotent — kills any existing
 # proxy/cloudflared processes before starting fresh.
 #
 # Usage:  ./start.sh
-# Logs:   mac-proxy/proxy.log  and  mac-proxy/tunnel.log
+# Logs:   proxy/proxy.log  and  proxy/tunnel.log
 
 set -euo pipefail
 

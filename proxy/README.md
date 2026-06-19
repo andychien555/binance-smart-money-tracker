@@ -1,6 +1,6 @@
-# mac-proxy — DigitalOcean 部署版
+# proxy — DigitalOcean 部署版
 
-⚠️ **資料夾名稱保留 "mac-proxy" 是 historical**：proxy 原本跑在 Mac 上經 Cloudflare Tunnel 連回 Worker，2026-05-14 已遷到 DigitalOcean Singapore VPS。重新命名（成 `do-proxy/` 之類）等想清楚再做，避免動到 import path 跟現有 commit history。
+ℹ️ proxy 原本跑在 Mac 上經 Cloudflare Tunnel 連回 Worker，2026-05-14 已遷到 DigitalOcean Singapore VPS；資料夾 2026-06-19 從 `mac-proxy/` 改名為 `proxy/`。**注意**：DO VPS 上的實際路徑仍是 `/root/.openclaw/workspace/mac-proxy/`（線上沒一起改），所以本文下方的 DO 操作絕對路徑維持 `mac-proxy`。
 
 `proxy.mjs` 本身沒改，這份 README 的內容已全部替換成 DO 部署 / 操作 / debug 流程。
 
