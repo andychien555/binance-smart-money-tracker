@@ -469,6 +469,10 @@ if(urlParams.get('symbol')) currentSymbol=urlParams.get('symbol').toLowerCase();
 
 const DATA_BASE='/data';
 const HIDDEN_SYMBOLS=new Set(['siren','rave','pippin','power']);
+// Pinned to the bottom of the symbol bar, in this order. Everything else keeps
+// its symbols.json order above them.
+const PINNED_LAST=['river','lab'];
+const pinRank=s=>{const i=PINNED_LAST.indexOf(s.toLowerCase());return i<0?-1:i;};
 async function fetchSymRecent(sym){
   // Fetch last 2 days of NDJSON for sym → return {latest, prev24h}.
   // prev24h is the row closest to (latest_ts - 24h).
@@ -498,7 +502,13 @@ async function fetchSymRecent(sym){
 async function fetchSymbols(){
   const list=await (await fetch(`${DATA_BASE}/symbols.json`)).json();
   const filtered=list.filter(s=>!HIDDEN_SYMBOLS.has(s.symbol.toLowerCase()))
-    .sort((a,b)=>(a.symbol.toLowerCase()==='river')-(b.symbol.toLowerCase()==='river'));
+    .sort((a,b)=>{
+      const x=pinRank(a.symbol), y=pinRank(b.symbol);
+      if(x<0&&y<0) return 0;   // both unpinned — keep symbols.json order
+      if(x<0) return -1;
+      if(y<0) return 1;
+      return x-y;
+    });
   await Promise.all(filtered.map(async s=>{
     if(!s.has_data) return;
     const r=await fetchSymRecent(s.symbol);
