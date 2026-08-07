@@ -291,8 +291,8 @@ async function collectSymbol(
 		tradeInfo = {
 			tape_large_count: largeTrades.length,
 			tape_medium_count: mediumTrades.length,
-			tape_large_buy: mediumTrades.filter((t: any) => !t.m).length,
-			tape_large_sell: mediumTrades.filter((t: any) => t.m).length,
+			tape_large_buy: largeTrades.filter((t: any) => !t.m).length,
+			tape_large_sell: largeTrades.filter((t: any) => t.m).length,
 			tape_aggr_buy_k: round(buyVol / 1e3, 1),
 			tape_aggr_sell_k: round(sellVol / 1e3, 1),
 		};
@@ -527,8 +527,13 @@ export default {
 		// Called by runCollection's fan-out; returns the batch's summary rows.
 		if (p === "/collect") {
 			const batches = getBatches();
-			const batchIdx = Number(url.searchParams.get("batch"));
+			// Number(null) and Number("") are both 0, so an absent param would
+			// otherwise pass the range check and silently collect batch 0.
+			const rawBatch = url.searchParams.get("batch");
+			const batchIdx = Number(rawBatch);
 			if (
+				rawBatch === null ||
+				rawBatch.trim() === "" ||
 				!Number.isInteger(batchIdx) ||
 				batchIdx < 0 ||
 				batchIdx >= batches.length
