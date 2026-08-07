@@ -397,7 +397,7 @@ const urlParams=new URLSearchParams(window.location.search);
 if(urlParams.get('symbol')) currentSymbol=urlParams.get('symbol').toLowerCase();
 
 const DATA_BASE='/data';
-const HIDDEN_SYMBOLS=new Set(['siren','rave','pippin','beat','power']);
+const HIDDEN_SYMBOLS=new Set(['siren','rave','pippin','power']);
 async function fetchSymbols(){
   const list=await (await fetch(`${DATA_BASE}/symbols.json`)).json();
   return list.filter(s=>!HIDDEN_SYMBOLS.has(s.symbol.toLowerCase()));
