@@ -57,6 +57,8 @@
   /* === Symbol bar (mobile-first: top tabs) === */
   .app-layout { display:block; }
   .symbol-bar { display:grid; grid-template-columns:repeat(2, 1fr); gap:var(--s-2); padding:var(--s-4) var(--s-5) var(--s-2); align-items:stretch; }
+  /* Odd symbol count: let the trailing tile fill the row instead of leaving a gap. */
+  .symbol-bar .sym-btn:last-child:nth-child(odd) { grid-column:span 2; }
   .sym-btn {
     background:var(--surface); border:1px solid var(--line); color:var(--fg-2);
     padding:var(--s-3); border-radius:var(--r);
@@ -94,6 +96,8 @@
   .sym-btn .sym-sec-chg.neg { color:var(--bear); }
   .sym-btn.no-data { opacity:0.35; cursor:not-allowed; }
   .sym-btn.no-data:hover { background:var(--surface); border-color:var(--line); }
+  /* Last collection failed — numbers are the previous cycle's, still clickable. */
+  .sym-btn.stale .sym-sec-val, .sym-btn.stale .sym-sec-chg { opacity:0.5; }
 
   /* === Desktop sidebar (≥ 768px) === */
   @media (min-width: 768px) {
@@ -468,7 +472,8 @@ const urlParams=new URLSearchParams(window.location.search);
 if(urlParams.get('symbol')) currentSymbol=urlParams.get('symbol').toLowerCase();
 
 const DATA_BASE='/data';
-const HIDDEN_SYMBOLS=new Set(['siren','rave','pippin','power']);
+// Visibility lives on SYMBOLS_META in the worker and rides in on symbols.json
+// as s.hidden, so both dashboards stay in sync from one edit.
 // Pinned to the bottom of the symbol bar, in this order. Everything else keeps
 // its symbols.json order above them.
 const PINNED_LAST=['river','lab'];
@@ -501,7 +506,7 @@ async function fetchSymRecent(sym){
 }
 async function fetchSymbols(){
   const list=await (await fetch(`${DATA_BASE}/symbols.json`)).json();
-  const filtered=list.filter(s=>!HIDDEN_SYMBOLS.has(s.symbol.toLowerCase()))
+  const filtered=list.filter(s=>!s.hidden)
     .sort((a,b)=>{
       const x=pinRank(a.symbol), y=pinRank(b.symbol);
       if(x<0&&y<0) return 0;   // both unpinned — keep symbols.json order
@@ -584,6 +589,8 @@ function renderSymbolBar(){
   return `<aside class="symbol-bar">${symbolList.map(s=>{
     const active=s.symbol===currentSymbol?'active':'';
     const nodata=!s.has_data?'no-data':'';
+    const stale=s.stale?'stale':'';
+    const staleTitle=s.stale?` title="Last collection failed — showing ${s.last_ts||'the previous cycle'}"`:'';
 
     // Price section
     const priceTxt=s.price?`$${fmtPrice(s.price)}`:'—';
@@ -603,7 +610,7 @@ function renderSymbolBar(){
     const smDCls=smDValid?(smDN>=0?'pos':'neg'):'';
     const smDTxt=smDValid?`${smDN>=0?'+':''}${smDN.toFixed(1)}%`:'';
 
-    return `<button class="sym-btn ${active} ${nodata}" onclick="switchSymbol('${s.symbol}')" ${!s.has_data?'disabled':''}>
+    return `<button class="sym-btn ${active} ${nodata} ${stale}" onclick="switchSymbol('${s.symbol}')" ${!s.has_data?'disabled':''}${staleTitle}>
       <div class="sym-name">${s.symbol.toUpperCase()}</div>
       <div class="sym-sec">
         <div class="sym-sec-label">Price · 24h changed</div>
@@ -1044,10 +1051,11 @@ function updateAgoDisplay(){
 (async()=>{
   try{
     symbolList=await fetchSymbols();
-    // If current symbol has no data, pick first with data
-    const cur=symbolList.find(s=>s.symbol===currentSymbol);
-    if(!cur||!cur.has_data){
-      const first=symbolList.find(s=>s.has_data);
+    // Keep an explicitly requested symbol selected even when its last collection
+    // failed — its day shards are still in R2 and still render. Only fall back
+    // when the symbol isn't tracked at all.
+    if(!symbolList.some(s=>s.symbol===currentSymbol)){
+      const first=symbolList.find(s=>s.has_data)||symbolList[0];
       if(first) currentSymbol=first.symbol;
     }
     document.title=currentSymbol.toUpperCase()+'/USDT Dashboard';

@@ -105,7 +105,9 @@ Cloudflare Workers Free plan 對 **每次** invocation（cron `scheduled` 與 `f
 ├── smart-money-collector/              # Cloudflare Worker（含前端 SPA）
 │   ├── src/index.ts                    # scheduled handler + /data/* + /run
 │   ├── public/index.html               # 前端（單檔，純 vanilla JS + lightweight-charts）
+│   ├── public/v2.html                  # 舊版前端（同一份 symbols.json / NDJSON 資料源）
 │   ├── scripts/seed-local-r2.sh        # 把線上 R2 抓回本機 miniflare（dev 用）
+│   ├── scripts/*.mjs                   # 一次性 R2 資料 migration（跑完即可留作紀錄）
 │   ├── wrangler.jsonc                  # cron + R2 binding + assets 設定
 │   ├── package.json
 │   └── tsconfig.json
@@ -209,13 +211,13 @@ const SYMBOLS_META: SymbolMeta[] = [
 
 ## 隱藏 / 顯示某個 symbol
 
-編 [smart-money-collector/public/index.html](smart-money-collector/public/index.html) 裡的 `HIDDEN_SYMBOLS`：
+在 [smart-money-collector/src/index.ts](smart-money-collector/src/index.ts) 的 `SYMBOLS_META` 上加 `hidden`：
 
-```js
-const HIDDEN_SYMBOLS = new Set(['siren','lit']);  // 短名
+```ts
+{ symbol: "XXXUSDT", short: "xxx", label: "XXX/USDT", hidden: true },
 ```
 
-資料採集不受影響。改完 `npm run deploy` 上線。
+這個旗標會被寫進 `symbols.json`，兩份 dashboard（`/` 和 `/v2.html`）都讀同一份，所以只要改這一個地方。資料採集不受影響，`/data/xxx/…` 也照樣提供。改完 `npx wrangler deploy` 上線。
 
 ---
 
@@ -227,7 +229,9 @@ curl https://smart-money-collector.andychien-design.workers.dev/data/symbols.jso
 
 每筆 `last_ts` 距現在應該不超過 15 分鐘（UTC+8 字串格式 `YYYY-MM-DD HH:MM`）。
 
-如果出現 `has_data: false`，看 `error` 欄判斷：
+如果出現 `stale: true`，代表這一輪該 symbol 收集失敗，顯示的是上一輪的數字（dashboard 會把它淡化但仍可點）。`last_ts` 會停在上次成功的時間，`error` 欄記錄這輪的失敗原因。偶爾一兩輪屬正常；連續多輪就照下面的 `error` 對照排查。
+
+`has_data: false` 只會出現在「從來沒收集成功過」的 symbol（例如剛加進 `SYMBOLS_META` 還沒跑過第一輪）。看 `error` 欄判斷：
 - `HTTP 451` — Binance 開始封 DO 那台 IP（可能性低，DO Singapore IP 信譽乾淨）。換掉 DO 那台、或加更多出口
 - `HTTP 530` / `HTTP 525` — Caddy 那層問題（cert 沒簽到、systemd 沒啟動）
 - `HTTP 502` from proxy — proxy.mjs 連不到 Binance（DNS / network issue），少見

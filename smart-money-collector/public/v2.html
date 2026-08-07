@@ -81,6 +81,8 @@
   .sym-btn .sym-chg { font-size:10px; font-weight:500; }
   .sym-btn.no-data { opacity:0.35; cursor:not-allowed; }
   .sym-btn.no-data:hover { background:transparent; color:var(--fg-2); }
+  /* Last collection failed — numbers are the previous cycle's, still clickable. */
+  .sym-btn.stale .sym-price, .sym-btn.stale .sym-chg { opacity:0.5; }
 
   /* === Header === */
   .header { padding:var(--s-4) var(--s-5) var(--s-4); display:flex; align-items:baseline; gap:var(--s-4); flex-wrap:wrap; }
@@ -397,10 +399,11 @@ const urlParams=new URLSearchParams(window.location.search);
 if(urlParams.get('symbol')) currentSymbol=urlParams.get('symbol').toLowerCase();
 
 const DATA_BASE='/data';
-const HIDDEN_SYMBOLS=new Set(['siren','rave','pippin','power']);
 async function fetchSymbols(){
   const list=await (await fetch(`${DATA_BASE}/symbols.json`)).json();
-  return list.filter(s=>!HIDDEN_SYMBOLS.has(s.symbol.toLowerCase()));
+  // Visibility lives on SYMBOLS_META in the worker and rides in on symbols.json
+  // as s.hidden, so both dashboards stay in sync from one edit.
+  return list.filter(s=>!s.hidden);
 }
 async function fetchData(h){
   const idxRes=await fetch(`${DATA_BASE}/${currentSymbol}/days/index.json`);
@@ -452,11 +455,13 @@ function renderSymbolBar(){
   return `<div class="symbol-bar">${symbolList.map(s=>{
     const active=s.symbol===currentSymbol?'active':'';
     const nodata=!s.has_data?'no-data':'';
+    const stale=s.stale?'stale':'';
+    const staleTitle=s.stale?` title="Last collection failed — showing ${s.last_ts||'the previous cycle'}"`:'';
     const priceTxt=s.price?`$${fmtPrice(s.price)}`:'';
     const chg=s.change_pct!=null?s.change_pct:0;
     const chgCls=chg>=0?'pos':'neg';
     const chgTxt=s.has_data?`<span class="sym-chg ${chgCls}">${chg>=0?'+':''}${Number(chg).toFixed(2)}%</span>`:'<span class="sym-chg">no data</span>';
-    return `<button class="sym-btn ${active} ${nodata}" onclick="switchSymbol('${s.symbol}')" ${!s.has_data?'disabled':''}>
+    return `<button class="sym-btn ${active} ${nodata} ${stale}" onclick="switchSymbol('${s.symbol}')" ${!s.has_data?'disabled':''}${staleTitle}>
       <span class="sym-name">${s.symbol.toUpperCase()}</span>
       <span class="sym-price">${priceTxt}</span>
       ${chgTxt}
@@ -822,10 +827,11 @@ function updateAgoDisplay(){
 (async()=>{
   try{
     symbolList=await fetchSymbols();
-    // If current symbol has no data, pick first with data
-    const cur=symbolList.find(s=>s.symbol===currentSymbol);
-    if(!cur||!cur.has_data){
-      const first=symbolList.find(s=>s.has_data);
+    // Keep an explicitly requested symbol selected even when its last collection
+    // failed — its day shards are still in R2 and still render. Only fall back
+    // when the symbol isn't tracked at all.
+    if(!symbolList.some(s=>s.symbol===currentSymbol)){
+      const first=symbolList.find(s=>s.has_data)||symbolList[0];
       if(first) currentSymbol=first.symbol;
     }
     document.title=currentSymbol.toUpperCase()+'/USDT Dashboard';

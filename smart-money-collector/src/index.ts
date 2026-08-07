@@ -5,8 +5,16 @@ type SymbolMeta = {
 	symbol: string;
 	short: string;
 	label: string;
+	// Still collected and still served under /data/<short>/…, just left out of
+	// the dashboards' symbol bar. Single source of truth for symbol visibility —
+	// it rides along in symbols.json so both pages agree from one edit.
+	hidden?: boolean;
 	onchain?: { chain: string; addr: string };
 };
+
+// The only two fields of the BTCUSDT 24hr ticker that a symbol row consumes.
+// Fetched once per collection and handed to each batch (see runCollection).
+type BtcRef = { lastPrice: string; priceChangePercent: string };
 
 const SYMBOLS_META: SymbolMeta[] = [
 	{
@@ -293,6 +301,8 @@ async function collectSymbol(
 			tape_medium_count: mediumTrades.length,
 			tape_large_buy: largeTrades.filter((t: any) => !t.m).length,
 			tape_large_sell: largeTrades.filter((t: any) => t.m).length,
+			tape_medium_buy: mediumTrades.filter((t: any) => !t.m).length,
+			tape_medium_sell: mediumTrades.filter((t: any) => t.m).length,
 			tape_aggr_buy_k: round(buyVol / 1e3, 1),
 			tape_aggr_sell_k: round(sellVol / 1e3, 1),
 		};
@@ -380,10 +390,25 @@ type SummaryEntry = {
 	price: number | null;
 	change_pct: number | null;
 	sm_ls_ratio?: any;
+	// True when there is something displayable: this cycle's numbers, or the
+	// previous cycle's carried forward (see carryForwardFailures). Only a symbol
+	// that has never collected successfully is false.
 	has_data: boolean;
+	// Set when this cycle failed and the numbers above came from the last one.
+	stale?: boolean;
+	hidden?: boolean;
 	last_ts?: string;
 	error?: string;
 };
+
+function fetchBtcRef(env: Env): Promise<BtcRef | null> {
+	return fetchSafe("btc-ref", () =>
+		fetchJson<BtcRef>(
+			env,
+			"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT",
+		),
+	);
+}
 
 // Collect one batch of symbols within a single invocation (its own subrequest
 // budget). Writes each symbol's day shard + prev_row; returns the summary rows.
@@ -391,13 +416,11 @@ type SummaryEntry = {
 async function collectGroup(
 	env: Env,
 	metas: SymbolMeta[],
+	btcRef?: BtcRef,
 ): Promise<SummaryEntry[]> {
-	const btcTicker = await fetchSafe("btc-ref", () =>
-		fetchJson<any>(
-			env,
-			"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT",
-		),
-	);
+	// The orchestrator fetches this once and passes it to every batch; fetch it
+	// here only on a direct /collect call, or if the orchestrator's own failed.
+	const btcTicker = btcRef ?? (await fetchBtcRef(env));
 
 	const results = await Promise.allSettled(
 		metas.map((m) => collectSymbol(m, env, btcTicker)),
@@ -413,6 +436,7 @@ async function collectGroup(
 				change_pct: r.value.row.price_change_pct,
 				sm_ls_ratio: r.value.row.sm_ls_ratio,
 				has_data: true,
+				hidden: meta.hidden,
 				last_ts: r.value.row.timestamp,
 			};
 		}
@@ -423,6 +447,7 @@ async function collectGroup(
 			price: null,
 			change_pct: null,
 			has_data: false,
+			hidden: meta.hidden,
 			error: String(r.reason),
 		};
 	});
@@ -434,11 +459,21 @@ async function collectGroup(
 // spends one subrequest per batch.
 async function runCollection(env: Env) {
 	const batches = getBatches();
+
+	// Every row carries the same BTC reference, so fetch it once here instead of
+	// once per batch. On failure the params are omitted and each batch falls
+	// back to fetching it itself.
+	const btcRef = await fetchBtcRef(env);
+	const btcQuery = btcRef
+		? `&btc_price=${encodeURIComponent(btcRef.lastPrice)}` +
+			`&btc_pct=${encodeURIComponent(btcRef.priceChangePercent)}`
+		: "";
+
 	const perBatch = await Promise.all(
 		batches.map(async (group, i): Promise<SummaryEntry[]> => {
 			try {
 				const resp = await env.SELF.fetch(
-					`${SELF_ORIGIN}/collect?batch=${i}`,
+					`${SELF_ORIGIN}/collect?batch=${i}${btcQuery}`,
 				);
 				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 				const body = (await resp.json()) as { summary: SummaryEntry[] };
@@ -452,6 +487,7 @@ async function runCollection(env: Env) {
 						price: null,
 						change_pct: null,
 						has_data: false,
+						hidden: meta.hidden,
 						error: String(e),
 					}),
 				);
@@ -460,7 +496,9 @@ async function runCollection(env: Env) {
 	);
 
 	const summary = perBatch.flat();
-	await env.DATA.put("symbols.json", JSON.stringify(summary), {
+	const merged = await carryForwardFailures(env, summary);
+
+	await env.DATA.put("symbols.json", JSON.stringify(merged), {
 		httpMetadata: { contentType: "application/json" },
 	});
 	await env.DATA.put(
@@ -470,10 +508,49 @@ async function runCollection(env: Env) {
 	);
 
 	const ok = summary.filter((s) => s.has_data).length;
+	const stale = merged.filter((s) => s.stale).length;
 	console.log(
-		`Done: ${ok}/${summary.length} symbols collected (${batches.length} batches)`,
+		`Done: ${ok}/${summary.length} symbols collected ` +
+			`(${batches.length} batches)` +
+			(stale ? `, ${stale} carried forward from the previous cycle` : ""),
 	);
-	return { ok, total: summary.length, summary };
+	return { ok, stale, total: summary.length, summary: merged };
+}
+
+// symbols.json is rewritten wholesale every cycle, so a symbol whose collection
+// failed this round would otherwise drop to price:null/has_data:false — which
+// blanks its card and greys out its tile even though its day shards in R2 are
+// intact and still render. Carry the last good numbers forward, flagged stale.
+async function carryForwardFailures(
+	env: Env,
+	summary: SummaryEntry[],
+): Promise<SummaryEntry[]> {
+	if (summary.every((s) => s.has_data)) return summary;
+
+	let prev: Map<string, SummaryEntry>;
+	try {
+		const obj = await env.DATA.get("symbols.json");
+		if (!obj) return summary;
+		const rows = (await obj.json()) as SummaryEntry[];
+		prev = new Map(rows.map((r) => [r.symbol, r]));
+	} catch (e) {
+		console.error("[ERROR] could not read previous symbols.json:", e);
+		return summary;
+	}
+
+	return summary.map((entry) => {
+		if (entry.has_data) return entry;
+		const old = prev.get(entry.symbol);
+		if (!old?.has_data) return entry;
+		return {
+			...old,
+			// Metadata always comes from this deployment, never the old file.
+			label: entry.label,
+			hidden: entry.hidden,
+			stale: true,
+			error: entry.error,
+		};
+	});
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -540,7 +617,16 @@ export default {
 			) {
 				return jsonResponse({ error: "invalid batch" }, 400);
 			}
-			const summary = await collectGroup(env, batches[batchIdx]);
+			// Supplied by runCollection's fan-out so the batch doesn't refetch
+			// the BTC reference; absent on a direct call, which then fetches it.
+			const btcPrice = url.searchParams.get("btc_price");
+			const btcPct = url.searchParams.get("btc_pct");
+			const btcRef: BtcRef | undefined =
+				btcPrice && btcPct
+					? { lastPrice: btcPrice, priceChangePercent: btcPct }
+					: undefined;
+
+			const summary = await collectGroup(env, batches[batchIdx], btcRef);
 			return jsonResponse({ summary });
 		}
 
@@ -578,14 +664,18 @@ export default {
 		return new Response(
 			"smart-money-collector\n\n" +
 				"GET /run                              trigger collection now (fans out to batches)\n" +
-				"GET /collect?batch=N                  collect one batch (internal fan-out target)\n" +
+				"GET /collect?batch=N                  collect one batch (internal fan-out target;\n" +
+				"                                      optional &btc_price=&btc_pct= reuse the\n" +
+				"                                      orchestrator's BTC reference)\n" +
 				"GET /data/symbols.json                list of symbols\n" +
 				"GET /data/<short>/prev_row.json       latest row\n" +
 				"GET /data/<short>/days/index.json     list of available dates\n" +
 				"GET /data/<short>/days/<date>.ndjson  daily shard, one row per line\n" +
 				"GET /data/<short>/history_full.json   (legacy, stale fallback)\n\n" +
 				"symbols: " +
-				SYMBOLS_META.map((m) => m.short).join(", "),
+				SYMBOLS_META.map(
+					(m) => m.short + (m.hidden ? " (hidden)" : ""),
+				).join(", "),
 			{ headers: { "content-type": "text/plain", ...CORS_HEADERS } },
 		);
 	},
