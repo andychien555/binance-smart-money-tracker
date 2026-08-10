@@ -270,7 +270,10 @@ const SYMBOLS_META: SymbolMeta[] = [
 ### 設定步驟
 
 1. Telegram 上找 [@BotFather](https://t.me/BotFather) → `/newbot` → 拿到 bot token
-2. 跟自己的 bot 講一句話，然後開 `https://api.telegram.org/bot<TOKEN>/getUpdates` 拿 `chat.id`
+2. 拿 `chat.id`（`<TOKEN>` 直接替換掉，**不要留角括號**，`%3C...%3E` 是角括號被 URL 編碼的結果）：
+   - **推到個人對話**：先傳一句話給自己的 bot，再開 `https://api.telegram.org/bot<TOKEN>/getUpdates`，取 `chat.id`（正數）
+   - **推到群組**：把 bot 加進群組後，開 `https://api.telegram.org/bot<TOKEN>/getUpdates?allowed_updates=["my_chat_member"]`，取 `chat.id`（負數）。**`allowed_updates` 不能省** — bot 預設隱私模式（`can_read_all_group_messages: false`）讀不到群組裡的一般訊息，不指定的話 `getUpdates` 會是空的。隱私模式不影響發送，維持關閉狀態即可
+   - 群組**建議用 supergroup**：一般群組升級成 supergroup 時 `chat.id` 會從 `-123456789` 變成 `-100` 開頭的長數字，舊 ID 失效、推播會靜默中斷
 3. 設 secret 並部署：
 
 ```bash
