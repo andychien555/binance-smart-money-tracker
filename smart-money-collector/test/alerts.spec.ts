@@ -102,6 +102,18 @@ describe("detect", () => {
 		expect(detect(state, [sample({ sm_ls_ratio: 1.22 })], ms, TS)).toEqual([]);
 	});
 
+	it("ignores a notional move below the percentage floor", () => {
+		const { state, ms } = warmUp(40);
+		// +2% against a ±0.2% spread is many sigma, but too small to care about.
+		expect(
+			detect(state, [sample({ sm_long_pos_usdt: 4.08 })], ms, TS),
+		).toEqual([]);
+		// ...while the next step, +5% from there, does fire.
+		expect(
+			detect(state, [sample({ sm_long_pos_usdt: 4.3 })], ms + STEP, TS),
+		).toHaveLength(1);
+	});
+
 	it("ignores a big percentage swing on a near-empty book", () => {
 		const { state, ms } = warmUp(40, {
 			sm_long_pos_usdt: 0.1,

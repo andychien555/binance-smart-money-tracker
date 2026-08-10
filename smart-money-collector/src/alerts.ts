@@ -41,8 +41,14 @@ const MAX_RECENT = 50; // kept in state, served at /data/alerts.json
 // Floors that stop a statistically loud move from firing when it is
 // economically meaningless. A symbol whose ratio barely budges has a tiny
 // sigma, which would otherwise turn every twitch into a 3-sigma event.
+//
+// Keep these low enough that the sigma stays in charge for most symbols. At
+// MIN_POS_PCT = 0.1 the floor decided 12 of 14 notional checks outright —
+// BTC's 2.5-sigma step is 1.6%, so a 10% floor made it a 15-sigma ask that
+// would never fire. Measured against real history on 2026-08-10; re-derive
+// from /data/alerts.json rather than guessing if these need another pass.
 const MIN_LS_DELTA = 0.05; // absolute sm_ls_ratio change
-const MIN_POS_PCT = 0.1; // 10% swing in one side's notional...
+const MIN_POS_PCT = 0.03; // 3% swing in one side's notional...
 const MIN_POS_USDT = 0.5; // ...on a side holding >= $0.5M (row unit: millions)
 
 // --- state ----------------------------------------------------------------
