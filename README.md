@@ -1,6 +1,6 @@
 # BN Smart Money Tracker
 
-把 Binance Futures「聰明錢」訊號 + 訂單簿 / 大單 / 鏈上持有人結構，每 15 分鐘抓一次、寫進 Cloudflare R2，前端純 static 從 Worker 讀。
+把 Binance Futures「聰明錢」訊號 + 訂單簿 / 大單 / 鏈上持有人結構，每 15 分鐘抓一次、寫進 Cloudflare R2，前端純 static 從 Worker 讀。多空比與持倉出現異常變動時推 Telegram 通知，見「異動通知」。
 
 線上版：[https://smart-money-collector.andychien-design.workers.dev/](https://smart-money-collector.andychien-design.workers.dev/) — 前端 SPA 與 API 都由同一個 Cloudflare Worker 提供（static assets 走 `assets` binding，資料走 `/data/*` 路由）。
 
@@ -14,8 +14,11 @@
 | BTC/USDT | ✅ | — |
 | ETH/USDT | ✅ | — |
 | SOL/USDT | ✅ | — |
+| LIT/USDT | ✅ | — |
+| LAB/USDT | ✅ | — |
+| BEAT/USDT | ✅ | — |
 
-要加減 symbol 見下方「新增 symbol」。
+要加減 symbol 見下方「新增 symbol」。前端要不要顯示是另一回事，見「隱藏 / 顯示某個 symbol」。
 
 ---
 
@@ -52,20 +55,24 @@
 │  Cloudflare Worker  (smart-money-collector)                    │
 │                                                                │
 │    cron trigger: */15 * * * *                                  │
-│      └─ scheduled handler                                      │
-│            ├─ fetch 3 binance hosts × 4 symbols                │
-│            │   (透過 DO proxy，見下)                           │
-│            └─ write to R2 bucket `smart-money-data`            │
+│      └─ scheduled handler (orchestrator)                       │
+│            ├─ GET /collect?batch=N  ×3  (self service-binding) │
+│            │     └─ fetch 3 binance hosts × 3 symbols          │
+│            │         (透過 DO proxy，見下) → R2                │
+│            ├─ write symbols.json / meta.json                   │
+│            └─ POST /alerts  (self service-binding)             │
+│                  └─ z-score 判斷 → Telegram push               │
 │                                                                │
 │    fetch handler (CORS-enabled JSON proxy)                     │
 │      GET /data/symbols.json                                    │
+│      GET /data/alerts.json                                     │
 │      GET /data/<short>/prev_row.json                           │
 │      GET /data/<short>/days/index.json                         │
 │      GET /data/<short>/days/<date>.ndjson                      │
 │      GET /run    (manual trigger)                              │
 └────┬──────────────────────────────────────────────┬────────────┘
      │ R2 binding                                   │ outbound HTTPS
-     ▼                                              ▼
+     ▼                                              ▼  (+ Telegram)
 ┌────────────────────────┐    ┌─────────────────────────────────┐
 │ R2: smart-money-data   │    │ DigitalOcean SGP1 (Singapore)   │
 │  <SYMBOL>/prev_row     │    │ 167.172.64.49                   │
@@ -73,6 +80,7 @@
 │  <SYMBOL>/days/*.ndjson│    │ Caddy (443, Let's Encrypt)      │
 │  symbols.json          │    │   └─ reverse_proxy → :8787      │
 │  meta.json             │    │                                 │
+│  alerts/state.json     │    │                                 │
            ▲                  │ systemd: binance-proxy.service  │
            │ fetch (CORS)     │   └─ node proxy.mjs (port 8787) │
 ┌──────────┴───────────┐      └────────────────┬────────────────┘
@@ -87,6 +95,7 @@
 - **DO proxy 中繼**：Binance 從 2026-05-13 起對 CF edge anycast IP 回 451，所以 Worker 不直接打 Binance，改走 DO Singapore 機房（IP 信譽乾淨、Binance 200）→ Caddy HTTPS → Node proxy → Binance。詳見 [proxy/README.md](proxy/README.md)
 - **每日 NDJSON 分片儲存**：每次 cron 只 append 一筆到當日 `<SYMBOL>/days/<YYYY-MM-DD>.ndjson`（純文字 append，不 parse 全量），歷史永久保留。前端依需要的時間區間決定要讀哪幾天的分片。設計理由見下方「Worker CPU 預算」。
 - **CORS / cache**：Worker `/data/*` 路由附 `Access-Control-Allow-Origin: *` 和 `Cache-Control: public, max-age=30`
+- **批次 fan-out**：CF Free plan 每次 invocation 上限 50 subrequests，一個 symbol 要 ~10-11 個，全部塞一次會爆。orchestrator 透過 self service-binding 把 symbol 分成每批 3 個各自打 `/collect?batch=N`，每批拿到全新的 subrequest 預算。異動判斷（`POST /alerts`）同理獨立一個 invocation，見下方「異動通知」
 
 ### Worker CPU 預算（重要）
 
@@ -104,6 +113,8 @@ Cloudflare Workers Free plan 對 **每次** invocation（cron `scheduled` 與 `f
 .
 ├── smart-money-collector/              # Cloudflare Worker（含前端 SPA）
 │   ├── src/index.ts                    # scheduled handler + /data/* + /run
+│   ├── src/alerts.ts                   # 異動偵測（z-score）+ Telegram 推播
+│   ├── test/alerts.spec.ts             # 偵測邏輯的單元測試（npm test）
 │   ├── public/index.html               # 前端（單檔，純 vanilla JS + lightweight-charts）
 │   ├── public/v2.html                  # 舊版前端（同一份 symbols.json / NDJSON 資料源）
 │   ├── scripts/seed-local-r2.sh        # 把線上 R2 抓回本機 miniflare（dev 用）
@@ -184,7 +195,9 @@ npm run deploy                    # = wrangler deploy
 
 Deploy 會同時上傳 `src/index.ts`（Worker 邏輯）跟 `public/`（前端 assets）。Cron 自動上線，下一個 `*/15` 整點就會跑。R2 bucket `smart-money-data` 需事先建好。
 
-⚠️ Worker 依賴兩個 secret：`PROXY_BASE`（DO HTTPS URL，目前 `https://167.172.64.49.nip.io`）、`PROXY_TOKEN`（proxy 驗證密鑰）。詳見 [proxy/README.md](proxy/README.md)。
+⚠️ Worker 依賴兩個 secret：`PROXY_BASE`（DO HTTPS URL，目前 `https://167.172.64.49.nip.io`）、`PROXY_TOKEN`（proxy 驗證密鑰，同時也是 `/alerts` 系列端點的內部驗證）。詳見 [proxy/README.md](proxy/README.md)。
+
+另有兩個**選用** secret `TG_BOT_TOKEN` / `TG_CHAT_ID`，只影響異動推播，見「異動通知」。
 
 ---
 
@@ -218,6 +231,83 @@ const SYMBOLS_META: SymbolMeta[] = [
 ```
 
 這個旗標會被寫進 `symbols.json`，兩份 dashboard（`/` 和 `/v2.html`）都讀同一份，所以只要改這一個地方。資料採集不受影響，`/data/xxx/…` 也照樣提供。改完 `npx wrangler deploy` 上線。
+
+---
+
+## 異動通知（Telegram）
+
+每次收集完，orchestrator 會把這輪的數字丟給 `POST /alerts`（self service-binding，獨立 invocation），偵測到異動就推一則 Telegram 訊息。邏輯全在 [smart-money-collector/src/alerts.ts](smart-money-collector/src/alerts.ts)。
+
+### 訊號怎麼判定
+
+**門檻是相對於該 symbol 自己的波動，不是固定值。** 固定門檻在這個追蹤清單上必定失敗：BTC 的多空比幾乎不動，小幣整天在跳，同一個數字不是讓 LAB 洗版就是讓 BTC 永遠不響。
+
+做法是對每個 symbol 各自維護一個 24 小時（96 筆）的滾動窗口，算出「這個 symbol 的 15 分鐘變化量」的標準差，當前這一筆超過 **2.5σ** 才算異動。追蹤三個指標：
+
+| 指標 | 來源欄位 | 計分方式 |
+|---|---|---|
+| 多空比 | `sm_ls_ratio` | 絕對變化量 |
+| 多單持倉 | `sm_long_pos_usdt` | 百分比變化 |
+| 空單持倉 | `sm_short_pos_usdt` | 百分比變化 |
+
+持倉用百分比是因為它的量級會差好幾個數量級；多空比本身是個比值，用絕對變化才有意義。
+
+### 防洗版的四道關卡
+
+1. **絕對下限**：多空比至少變動 0.05、持倉至少 10% 且該邊持倉 ≥ $0.5M。波動極小的 symbol 標準差會很小，任何抖動都算「幾十個 σ」，這道關卡把統計上很大但實質沒意義的變動擋掉
+2. **冷卻期**：同一 symbol 同一指標 3 小時內只推一次
+3. **合併推播**：一輪觸發的所有訊號合成一則訊息，按 symbol 分組，最強的訊號排最前
+4. **暖機期**：累積滿 8 小時（32 筆）歷史才開始判斷；`/alerts/backfill` 可以從 R2 既有資料直接補滿
+
+另外收集中斷超過 40 分鐘（漏掉 2 次以上 cron）時，那一筆的變化量橫跨的時間跟建立標準差時的 15 分鐘不可比，會照常存進窗口但跳過該輪評分。
+
+### 參數調整
+
+全部集中在 `src/alerts.ts` 最上方的 tuning 區塊（`Z_THRESHOLD`、`COOLDOWN_MS`、`MIN_LS_DELTA`、`MIN_POS_PCT`、`MIN_POS_USDT`、`WINDOW`）。
+
+觀察觸發頻率用 `GET /data/alerts.json`，會列出最近 50 筆觸發記錄含當時的 z 值 — 這是調參數的依據。太吵就調高 `Z_THRESHOLD` 或拉長冷卻，太安靜就反過來。
+
+### 設定步驟
+
+1. Telegram 上找 [@BotFather](https://t.me/BotFather) → `/newbot` → 拿到 bot token
+2. 跟自己的 bot 講一句話，然後開 `https://api.telegram.org/bot<TOKEN>/getUpdates` 拿 `chat.id`
+3. 設 secret 並部署：
+
+```bash
+cd smart-money-collector
+npx wrangler secret put TG_BOT_TOKEN
+npx wrangler secret put TG_CHAT_ID
+npm run deploy
+```
+
+4. 測推播通道（`PROXY_TOKEN` 是既有的 proxy 密鑰）：
+
+```bash
+curl -H "x-internal-token: <PROXY_TOKEN>" \
+  https://smart-money-collector.andychien-design.workers.dev/alerts/test
+```
+
+5. 從既有歷史補滿窗口，免得等 8 小時（一次一個 symbol）：
+
+```bash
+for s in river btc eth sol lit lab beat; do
+  curl -H "x-internal-token: <PROXY_TOKEN>" \
+    "https://smart-money-collector.andychien-design.workers.dev/alerts/backfill?symbol=$s"
+done
+```
+
+兩個 TG secret **是選用的**：沒設的話異動照樣偵測、照樣寫進 `/data/alerts.json`，只是不推播。想先觀察一陣子訊號品質再開推播的話，可以先不設。
+
+### 相關端點
+
+| 端點 | 用途 |
+|---|---|
+| `GET /data/alerts.json` | 最近 50 筆觸發記錄，新的在前 |
+| `POST /alerts` | 內部 fan-out 目標，需 `x-internal-token` |
+| `GET /alerts/backfill?symbol=<short>` | 從 R2 既有分片補滿某 symbol 的窗口，需 token |
+| `GET /alerts/test` | 送一則測試訊息確認 TG 通道，需 token |
+
+`/alerts` 系列都要 `x-internal-token: <PROXY_TOKEN>`：不擋的話任何人都能灌假資料進滾動窗口，或是拿你的 bot 洗版。
 
 ---
 

@@ -1,3 +1,14 @@
+import {
+	type AlertSample,
+	WINDOW as ALERT_WINDOW,
+	backfill,
+	detect,
+	formatMessage,
+	loadState,
+	saveState,
+	sendTelegram,
+} from "./alerts";
+
 const UA =
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/142.0.0.0 Safari/537.36";
 
@@ -55,6 +66,10 @@ type Env = {
 	PROXY_BASE: string;
 	PROXY_TOKEN: string;
 	SELF: Fetcher; // self service-binding for batch fan-out (see runCollection)
+	// Optional: without both, alerts are still detected and logged to
+	// /data/alerts.json, just not pushed anywhere.
+	TG_BOT_TOKEN?: string;
+	TG_CHAT_ID?: string;
 };
 
 const CORS_HEADERS = {
@@ -410,6 +425,12 @@ function fetchBtcRef(env: Env): Promise<BtcRef | null> {
 	);
 }
 
+type BatchResult = {
+	summary: SummaryEntry[];
+	// Only the symbols that collected successfully — see AlertSample.
+	samples: AlertSample[];
+};
+
 // Collect one batch of symbols within a single invocation (its own subrequest
 // budget). Writes each symbol's day shard + prev_row; returns the summary rows.
 // Does NOT write symbols.json — the orchestrator merges all batches first.
@@ -417,7 +438,7 @@ async function collectGroup(
 	env: Env,
 	metas: SymbolMeta[],
 	btcRef?: BtcRef,
-): Promise<SummaryEntry[]> {
+): Promise<BatchResult> {
 	// The orchestrator fetches this once and passes it to every batch; fetch it
 	// here only on a direct /collect call, or if the orchestrator's own failed.
 	const btcTicker = btcRef ?? (await fetchBtcRef(env));
@@ -426,18 +447,22 @@ async function collectGroup(
 		metas.map((m) => collectSymbol(m, env, btcTicker)),
 	);
 
-	return metas.map((meta, i): SummaryEntry => {
+	const samples: AlertSample[] = [];
+	const summary = metas.map((meta, i): SummaryEntry => {
 		const r = results[i];
 		if (r.status === "fulfilled") {
+			const { row } = r.value;
+			const sample = toAlertSample(meta, row);
+			if (sample) samples.push(sample);
 			return {
 				symbol: meta.short,
 				label: meta.label,
-				price: r.value.row.price,
-				change_pct: r.value.row.price_change_pct,
-				sm_ls_ratio: r.value.row.sm_ls_ratio,
+				price: row.price,
+				change_pct: row.price_change_pct,
+				sm_ls_ratio: row.sm_ls_ratio,
 				has_data: true,
 				hidden: meta.hidden,
-				last_ts: r.value.row.timestamp,
+				last_ts: row.timestamp,
 			};
 		}
 		console.error(`[ERROR] ${meta.symbol}:`, r.reason);
@@ -451,6 +476,29 @@ async function collectGroup(
 			error: String(r.reason),
 		};
 	});
+
+	return { summary, samples };
+}
+
+// A row missing any of the four numbers the detector tracks is dropped rather
+// than defaulted: a zero would land in the rolling window as a real datapoint
+// and both distort the sigma and fire a bogus alert on the way back up.
+function toAlertSample(
+	meta: SymbolMeta,
+	row: Record<string, any>,
+): AlertSample | null {
+	const nums = {
+		price: Number(row.price),
+		price_change_pct: Number(row.price_change_pct),
+		sm_ls_ratio: Number(row.sm_ls_ratio),
+		sm_long_pos_usdt: Number(row.sm_long_pos_usdt),
+		sm_short_pos_usdt: Number(row.sm_short_pos_usdt),
+	};
+	if (Object.values(nums).some((n) => !Number.isFinite(n))) {
+		console.warn(`[WARN] ${meta.symbol}: incomplete row, skipped for alerts`);
+		return null;
+	}
+	return { short: meta.short, label: meta.label, ...nums };
 }
 
 // Orchestrator (cron + /run): fan each batch out to its own sub-invocation via a
@@ -470,32 +518,34 @@ async function runCollection(env: Env) {
 		: "";
 
 	const perBatch = await Promise.all(
-		batches.map(async (group, i): Promise<SummaryEntry[]> => {
+		batches.map(async (group, i): Promise<BatchResult> => {
 			try {
 				const resp = await env.SELF.fetch(
 					`${SELF_ORIGIN}/collect?batch=${i}${btcQuery}`,
 				);
 				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-				const body = (await resp.json()) as { summary: SummaryEntry[] };
-				return body.summary;
+				return (await resp.json()) as BatchResult;
 			} catch (e) {
 				console.error(`[ERROR] batch ${i} fetch failed:`, e);
-				return group.map(
-					(meta): SummaryEntry => ({
-						symbol: meta.short,
-						label: meta.label,
-						price: null,
-						change_pct: null,
-						has_data: false,
-						hidden: meta.hidden,
-						error: String(e),
-					}),
-				);
+				return {
+					summary: group.map(
+						(meta): SummaryEntry => ({
+							symbol: meta.short,
+							label: meta.label,
+							price: null,
+							change_pct: null,
+							has_data: false,
+							hidden: meta.hidden,
+							error: String(e),
+						}),
+					),
+					samples: [],
+				};
 			}
 		}),
 	);
 
-	const summary = perBatch.flat();
+	const summary = perBatch.flatMap((b) => b.summary);
 	const merged = await carryForwardFailures(env, summary);
 
 	await env.DATA.put("symbols.json", JSON.stringify(merged), {
@@ -507,6 +557,11 @@ async function runCollection(env: Env) {
 		{ httpMetadata: { contentType: "application/json" } },
 	);
 
+	const alerts = await runAlertPass(
+		env,
+		perBatch.flatMap((b) => b.samples),
+	);
+
 	const ok = summary.filter((s) => s.has_data).length;
 	const stale = merged.filter((s) => s.stale).length;
 	console.log(
@@ -514,7 +569,134 @@ async function runCollection(env: Env) {
 			`(${batches.length} batches)` +
 			(stale ? `, ${stale} carried forward from the previous cycle` : ""),
 	);
-	return { ok, stale, total: summary.length, summary: merged };
+	return { ok, stale, total: summary.length, alerts, summary: merged };
+}
+
+// Detection runs in its own sub-invocation (POST /alerts) for a fresh 10ms CPU
+// budget — the same reason collection fans out into batches. Any failure in
+// here is logged and swallowed: a broken alert pass must never cost us a
+// collection cycle, whose data is the thing that cannot be recreated later.
+async function runAlertPass(
+	env: Env,
+	samples: AlertSample[],
+): Promise<AlertPassResult> {
+	if (!samples.length) return { fired: 0 };
+	try {
+		const resp = await env.SELF.fetch(`${SELF_ORIGIN}/alerts`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-internal-token": env.PROXY_TOKEN,
+			},
+			body: JSON.stringify(samples),
+		});
+		if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+		return (await resp.json()) as AlertPassResult;
+	} catch (e) {
+		console.error("[ERROR] alert pass failed:", e);
+		return { fired: 0, error: String(e) };
+	}
+}
+
+type AlertPassResult = { fired: number; pushed?: boolean; error?: string };
+
+// Fold this cycle's samples into the rolling window and push whatever fired.
+async function processAlerts(
+	env: Env,
+	samples: AlertSample[],
+): Promise<AlertPassResult> {
+	const now = new Date();
+	const state = await loadState(env.DATA);
+	const fired = detect(state, samples, now.getTime(), tsTaipei(now));
+
+	// Saved even when nothing fires: the window has to keep growing, and the
+	// cooldown stamps of anything that did fire live in here too.
+	await saveState(env.DATA, state);
+	if (!fired.length) return { fired: 0 };
+
+	console.log(
+		`[ALERT] ${fired.length} fired: ` +
+			fired
+				.map((f) => `${f.symbol}/${f.metric} ${f.z.toFixed(1)}σ`)
+				.join(", "),
+	);
+
+	if (!env.TG_BOT_TOKEN || !env.TG_CHAT_ID) {
+		console.warn("[WARN] telegram not configured — recorded, not pushed");
+		return { fired: fired.length, pushed: false };
+	}
+
+	try {
+		await sendTelegram(
+			env.TG_BOT_TOKEN,
+			env.TG_CHAT_ID,
+			formatMessage(fired, SELF_ORIGIN),
+		);
+		return { fired: fired.length, pushed: true };
+	} catch (e) {
+		// The save above already stamped the cooldowns, so this message is lost
+		// rather than retried next cycle. Dropping one push beats re-pushing
+		// every signal in it, and /data/alerts.json still holds the record.
+		console.error("[ERROR] telegram push failed:", e);
+		return { fired: fired.length, pushed: false, error: String(e) };
+	}
+}
+
+// Rebuild one symbol's window from the day shards already in R2. Reads the two
+// most recent days, enough to fill a 24h window whenever today's shard is
+// still short.
+async function backfillSymbol(
+	env: Env,
+	meta: SymbolMeta,
+): Promise<{ symbol: string; samples: number; last_ts: string | null }> {
+	const idxObj = await env.DATA.get(`${meta.symbol}/days/index.json`);
+	const dates = idxObj ? ((await idxObj.json()) as string[]) : [];
+
+	const shards = await Promise.all(
+		dates.slice(-2).map(async (d) => {
+			const obj = await env.DATA.get(`${meta.symbol}/days/${d}.ndjson`);
+			return obj ? obj.text() : "";
+		}),
+	);
+
+	// Each shard already ends in a newline, so plain concatenation is safe.
+	const lines = shards
+		.join("")
+		.split("\n")
+		.filter((l) => l !== "")
+		.slice(-ALERT_WINDOW);
+
+	const rows: { r: number; l: number; s: number }[] = [];
+	let lastTs: string | null = null;
+	for (const line of lines) {
+		try {
+			const row = JSON.parse(line);
+			const r = Number(row.sm_ls_ratio);
+			const l = Number(row.sm_long_pos_usdt);
+			const s = Number(row.sm_short_pos_usdt);
+			if (!Number.isFinite(r) || !Number.isFinite(l) || !Number.isFinite(s)) {
+				continue;
+			}
+			rows.push({ r, l, s });
+			if (typeof row.timestamp === "string") lastTs = row.timestamp;
+		} catch {
+			// A truncated trailing line is expected mid-append; skip it.
+		}
+	}
+
+	const state = await loadState(env.DATA);
+	const n = backfill(state, meta.short, rows, parseTaipeiTs(lastTs));
+	await saveState(env.DATA, state);
+
+	console.log(`[BACKFILL] ${meta.symbol}: ${n} samples up to ${lastTs}`);
+	return { symbol: meta.short, samples: n, last_ts: lastTs };
+}
+
+// Inverse of tsTaipei: "YYYY-MM-DD HH:MM" is a UTC+8 wall clock.
+function parseTaipeiTs(ts: string | null): number {
+	if (!ts) return 0;
+	const ms = Date.parse(`${ts.replace(" ", "T")}:00+08:00`);
+	return Number.isFinite(ms) ? ms : 0;
 }
 
 // symbols.json is rewritten wholesale every cycle, so a symbol whose collection
@@ -626,12 +808,69 @@ export default {
 					? { lastPrice: btcPrice, priceChangePercent: btcPct }
 					: undefined;
 
-			const summary = await collectGroup(env, batches[batchIdx], btcRef);
-			return jsonResponse({ summary });
+			return jsonResponse(await collectGroup(env, batches[batchIdx], btcRef));
+		}
+
+		// Internal fan-out target for runCollection's alert pass. Unlike /collect
+		// this is token-guarded: a stranger calling it could push fabricated
+		// samples into the rolling window, or burn the Telegram quota.
+		if (p === "/alerts") {
+			if (request.method !== "POST") {
+				return jsonResponse({ error: "POST only" }, 405);
+			}
+			if (request.headers.get("x-internal-token") !== env.PROXY_TOKEN) {
+				return jsonResponse({ error: "forbidden" }, 403);
+			}
+			let samples: AlertSample[];
+			try {
+				samples = (await request.json()) as AlertSample[];
+				if (!Array.isArray(samples)) throw new Error("expected an array");
+			} catch (e) {
+				return jsonResponse({ error: `bad body: ${e}` }, 400);
+			}
+			return jsonResponse(await processAlerts(env, samples));
+		}
+
+		// Seed one symbol's rolling window from the day shards already in R2, so
+		// detection starts working immediately instead of 8 hours after deploy.
+		// One symbol per call: parsing a full window is the CPU-heavy part.
+		if (p === "/alerts/backfill") {
+			if (request.headers.get("x-internal-token") !== env.PROXY_TOKEN) {
+				return jsonResponse({ error: "forbidden" }, 403);
+			}
+			const short = url.searchParams.get("symbol");
+			const meta = SYMBOLS_META.find((x) => x.short === short);
+			if (!meta) return jsonResponse({ error: "unknown symbol" }, 404);
+			return jsonResponse(await backfillSymbol(env, meta));
+		}
+
+		// Sanity-check the Telegram wiring without waiting for a real signal.
+		if (p === "/alerts/test") {
+			if (request.headers.get("x-internal-token") !== env.PROXY_TOKEN) {
+				return jsonResponse({ error: "forbidden" }, 403);
+			}
+			if (!env.TG_BOT_TOKEN || !env.TG_CHAT_ID) {
+				return jsonResponse({ error: "telegram secrets not set" }, 400);
+			}
+			await sendTelegram(
+				env.TG_BOT_TOKEN,
+				env.TG_CHAT_ID,
+				`🔔 <b>聰明錢異動</b> — 測試訊息\n\n` +
+					`推播通道正常，偵測到異動時會像這樣通知。\n` +
+					`<a href="${SELF_ORIGIN}">開啟 dashboard</a>`,
+			);
+			return jsonResponse({ ok: true });
 		}
 
 		if (p === "/data/symbols.json") {
 			return serveR2(env, "symbols.json");
+		}
+
+		// What has fired recently, newest first — the feedback loop for tuning
+		// the thresholds in alerts.ts.
+		if (p === "/data/alerts.json") {
+			const state = await loadState(env.DATA);
+			return jsonResponse({ recent: state.recent });
 		}
 
 		const dayIdxMatch = p.match(/^\/data\/([a-z0-9]+)\/days\/index\.json$/);
@@ -667,7 +906,11 @@ export default {
 				"GET /collect?batch=N                  collect one batch (internal fan-out target;\n" +
 				"                                      optional &btc_price=&btc_pct= reuse the\n" +
 				"                                      orchestrator's BTC reference)\n" +
+				"POST /alerts                          run the alert pass (internal, token)\n" +
+				"GET /alerts/backfill?symbol=<short>   seed one symbol's window (token)\n" +
+				"GET /alerts/test                      send a Telegram test push (token)\n" +
 				"GET /data/symbols.json                list of symbols\n" +
+				"GET /data/alerts.json                 recent alerts, newest first\n" +
 				"GET /data/<short>/prev_row.json       latest row\n" +
 				"GET /data/<short>/days/index.json     list of available dates\n" +
 				"GET /data/<short>/days/<date>.ndjson  daily shard, one row per line\n" +
