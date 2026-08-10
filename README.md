@@ -101,6 +101,19 @@
 
 Cloudflare Workers Free plan 對 **每次** invocation（cron `scheduled` 與 `fetch` 同等）有 **10ms CPU 上限**，超過會 `outcome: exceededCpu` 並中斷。Wall time（等 API 回應）不算 CPU，但 `JSON.parse` / `JSON.stringify` 大物件算。
 
+⚠️ **超過 10ms 不一定會立刻失敗**，所以不能用「沒掛掉」判斷安全。[官方文件](https://developers.cloudflare.com/workers/platform/limits/#cpu-time)：每個 isolate 有內建彈性容忍*偶爾*超標，但「If your Worker starts hitting the limit **consistently**, its execution will be terminated」。也就是說穩定超標的 invocation 是在寬限期內跑，隨時可能被開始終止。
+
+**實測（2026-08-10 17:18，`wrangler tail`，窗口已滿載）**：
+
+| invocation | CPU | 說明 |
+|---|---|---|
+| `/run` orchestrator | 3ms | 只做 fan-out 與 symbols.json |
+| `/collect` batch（3 symbols） | **13ms / 14ms** | ⚠️ 穩定超標，靠 isolate 寬限在跑 |
+| `/collect` batch（1 symbol） | 7ms | |
+| `/alerts`（7 symbols × 96 筆，state 17KB） | 3ms | 含 parse + z-score + stringify |
+
+由 1 symbol 7ms、3 symbols 13.5ms 反推：固定開銷約 3.75ms，每個 symbol 約 3.25ms。`BATCH_SIZE = 3` 因此註定落在 13ms 附近。最可能的主因是 `appendDayShard` 讀回當日 shard 再字串串接寫回 —— 當日檔案隨時間變大，所以**同一份程式碼在深夜的 CPU 會比清晨高**，這正是下面那條設計準則要避免的 pattern，只是被 sharding 縮小到「單日」而非消除。
+
 歷史教訓（2026-05-14）：原本 cron 每次都 `JSON.parse` ~1.8MB 的 `history_full.json` 再 `JSON.stringify` 寫回 R2，當 history 累積到 3000 筆上限後，CPU 穩定超過 10ms，cron 連續失敗 10 次。改成每日 NDJSON 分片（純文字 append，當日檔 ≤ ~60KB）後 CPU 壓到 ms 級。
 
 **未來新功能設計準則**：cron 內**避免**讀 → parse → modify → stringify → 寫回的「讀寫大物件」pattern，尤其是會隨時間增長的累積資料。改用 append-only 或 sharding。
@@ -290,7 +303,7 @@ curl -H "x-internal-token: <PROXY_TOKEN>" \
   https://smart-money-collector.andychien-design.workers.dev/alerts/test
 ```
 
-5. 從既有歷史補滿窗口，免得等 8 小時（一次一個 symbol）：
+5. 從既有歷史補滿窗口，免得等 8 小時（一次一個 symbol，每個會補到 96 筆）：
 
 ```bash
 for s in river btc eth sol lit lab beat; do
@@ -311,6 +324,12 @@ done
 | `GET /alerts/test` | 送一則測試訊息確認 TG 通道，需 token |
 
 `/alerts` 系列都要 `x-internal-token: <PROXY_TOKEN>`：不擋的話任何人都能灌假資料進滾動窗口，或是拿你的 bot 洗版。
+
+`PROXY_TOKEN` 的值在本機 [proxy/.env](proxy/.env)（被 `proxy/.gitignore` 忽略，不在 repo 裡），DO 上則是 `/root/.openclaw/workspace/mac-proxy/.env` 的 `PROXY_SECRET`，兩者必須一致。取用時別讓它進到 shell history 或輸出：
+
+```bash
+TOKEN=$(grep '^PROXY_SECRET=' proxy/.env | cut -d= -f2-)
+```
 
 ---
 
