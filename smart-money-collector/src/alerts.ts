@@ -20,7 +20,9 @@ export type AlertSample = {
 	sm_short_pos_usdt: number;
 };
 
-export type Metric = "ls" | "long" | "short";
+// "gate" is the absolute-level signal (see GATE_LEVEL); the other three are
+// change-vs-own-volatility signals.
+export type Metric = "ls" | "long" | "short" | "gate";
 
 // --- tuning ---------------------------------------------------------------
 // A move is worth pushing when it is large *relative to how much this symbol
@@ -33,8 +35,8 @@ export type Metric = "ls" | "long" | "short";
 
 export const WINDOW = 96; // samples kept per symbol = 24h at one per 15min
 const MIN_SAMPLES = 32; // need 8h of history before scoring anything
-const Z_THRESHOLD = 2.5; // sigmas above this symbol's own 15min spread
-const COOLDOWN_MS = 3 * 60 * 60 * 1000; // per symbol + metric
+const Z_THRESHOLD = 3.8; // sigmas above this symbol's own 15min spread
+const COOLDOWN_MS = 8 * 60 * 60 * 1000; // per symbol + metric
 const MAX_GAP_MS = 40 * 60 * 1000; // >2 cron cycles apart: step not comparable
 const MAX_RECENT = 50; // kept in state, served at /data/alerts.json
 
@@ -47,9 +49,29 @@ const MAX_RECENT = 50; // kept in state, served at /data/alerts.json
 // BTC's 2.5-sigma step is 1.6%, so a 10% floor made it a 15-sigma ask that
 // would never fire. Measured against real history on 2026-08-10; re-derive
 // from /data/alerts.json rather than guessing if these need another pass.
-const MIN_LS_DELTA = 0.05; // absolute sm_ls_ratio change
-const MIN_POS_PCT = 0.03; // 3% swing in one side's notional...
+const MIN_LS_DELTA = 0.18; // absolute sm_ls_ratio change
+const MIN_POS_PCT = 0.13; // 13% swing in one side's notional...
 const MIN_POS_USDT = 0.5; // ...on a side holding >= $0.5M (row unit: millions)
+
+// --- absolute level gate ---------------------------------------------------
+// Everything above scores *change*. This scores *level*: on the small caps a
+// long/short ratio above 2 is the setup worth acting on, and the move into it
+// matters however gradually the ratio drifted there. Rare by design — 13 times
+// in the 101 days to 2026-08-11.
+//
+// Crossing, not state: BEAT sat above 2 for 69% of its recorded history, so a
+// state check would fire every cycle. And the step has to have some size to it
+// — half of all raw crossings were 1.99 -> 2.00x jitter on the threshold, not
+// a breakout. GATE_MIN_DELTA screens those out while still catching a jump
+// straight from 1.999 to 4.20, which a "must start below 1.90" rule would miss.
+const GATE_LEVEL = 2.0;
+const GATE_MIN_DELTA = 0.1; // the crossing step must move the ratio this much
+const GATE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+
+// Which symbols the gate watches. Deliberately not on BTC/ETH/SOL: the signal
+// is about small caps, and the majors cross 2 often enough to drown it out
+// (BTC spent 29% of its history above 2). Add new small caps here.
+const GATE_SYMBOLS = new Set(["river", "lit", "lab", "beat"]);
 
 // --- state ----------------------------------------------------------------
 // Compact on purpose: the whole object is parsed and re-serialised every cron
@@ -183,6 +205,7 @@ export function detect(
 		// not comparable with the 15-minute steps the sigma was built from. Keep
 		// the sample — the window needs it — but do not score this round.
 		const gapped = prev != null && nowMs - prev.t > MAX_GAP_MS;
+		const prevLs = st.r.at(-1);
 
 		st.r = pushSample(st.r, s.sm_ls_ratio);
 		st.l = pushSample(st.l, s.sm_long_pos_usdt);
@@ -190,10 +213,42 @@ export function detect(
 		st.t = nowMs;
 		state.sym[s.short] = st;
 
+		// The gate compares two consecutive readings against a fixed level, so
+		// unlike the z-score checks it needs no history and survives a gap:
+		// crossing 2 is still crossing 2 an hour later.
+		const gateHit =
+			prevLs !== undefined &&
+			GATE_SYMBOLS.has(s.short) &&
+			prevLs < GATE_LEVEL &&
+			s.sm_ls_ratio >= GATE_LEVEL &&
+			s.sm_ls_ratio - prevLs >= GATE_MIN_DELTA &&
+			nowMs - (st.a.gate ?? 0) >= GATE_COOLDOWN_MS;
+
+		if (gateHit) {
+			st.a.gate = nowMs;
+			fired.push({
+				ts: tsLabel,
+				symbol: s.short,
+				label: s.label,
+				metric: "gate",
+				dir: "up",
+				from: prevLs,
+				to: s.sm_ls_ratio,
+				pct: (s.sm_ls_ratio - prevLs) / Math.max(Math.abs(prevLs), 1e-9),
+				z: 0, // not applicable — this is a level, not a deviation
+				price: s.price,
+				price_change_pct: s.price_change_pct,
+			});
+		}
+
 		if (gapped) continue;
 
 		const checks: { metric: Metric; series: number[]; relative: boolean }[] = [
-			{ metric: "ls", series: st.r, relative: false },
+			// A gate hit already says "the ratio jumped"; scoring "ls" on the same
+			// cycle would restate it as a second line in the same message.
+			...(gateHit
+				? []
+				: [{ metric: "ls" as Metric, series: st.r, relative: false }]),
 			{ metric: "long", series: st.l, relative: true },
 			{ metric: "short", series: st.s, relative: true },
 		];
@@ -257,6 +312,7 @@ const METRIC_LABEL: Record<Metric, string> = {
 	ls: "多空比",
 	long: "多單持倉",
 	short: "空單持倉",
+	gate: `多空比突破 ${GATE_LEVEL}`,
 };
 
 function esc(s: string): string {
@@ -291,21 +347,31 @@ export function formatMessage(
 
 	const blocks: string[] = [];
 	for (const rs of bySymbol.values()) {
-		// Strongest signal leads, and sets the block's direction arrow.
-		rs.sort((a, b) => Math.abs(b.z) - Math.abs(a.z));
+		// A gate hit always leads — it is the signal worth acting on, and its z
+		// is 0 by construction, so it would otherwise sort last.
+		rs.sort((a, b) => {
+			const ga = a.metric === "gate";
+			if (ga !== (b.metric === "gate")) return ga ? -1 : 1;
+			return Math.abs(b.z) - Math.abs(a.z);
+		});
 		const head = rs[0];
+		const icon =
+			head.metric === "gate" ? "🚨" : head.dir === "up" ? "📈" : "📉";
 		const lines = [
-			`${head.dir === "up" ? "📈" : "📉"} <b>${esc(head.label)}</b>  ` +
-				`$${fmtPrice(head.price)}  ` +
+			`${icon} <b>${esc(head.label)}</b>  $${fmtPrice(head.price)}  ` +
 				`<code>${fmtPct(head.price_change_pct / 100)} 24h</code>`,
 		];
 		for (const r of rs) {
-			const from = r.metric === "ls" ? r.from.toFixed(4) : fmtUsd(r.from);
-			const to = r.metric === "ls" ? r.to.toFixed(4) : fmtUsd(r.to);
-			lines.push(
-				`   ${METRIC_LABEL[r.metric]} ${from} → ${to}  ` +
-					`(${fmtPct(r.pct)}, ${r.z.toFixed(1)}σ)`,
-			);
+			const isRatio = r.metric === "ls" || r.metric === "gate";
+			const from = isRatio ? r.from.toFixed(4) : fmtUsd(r.from);
+			const to = isRatio ? r.to.toFixed(4) : fmtUsd(r.to);
+			// The gate has no sigma to report, and on a ratio that can triple the
+			// absolute move reads better than a percentage.
+			const detail =
+				r.metric === "gate"
+					? `+${(r.to - r.from).toFixed(3)}`
+					: `${fmtPct(r.pct)}, ${r.z.toFixed(1)}σ`;
+			lines.push(`   ${METRIC_LABEL[r.metric]} ${from} → ${to}  (${detail})`);
 		}
 		blocks.push(lines.join("\n"));
 	}
