@@ -17,6 +17,7 @@
 | LIT/USDT | ✅ | — |
 | LAB/USDT | ✅ | — |
 | BEAT/USDT | ✅ | — |
+| ZEC/USDT | ✅ | — |
 
 要加減 symbol 見下方「新增 symbol」。前端要不要顯示是另一回事，見「隱藏 / 顯示某個 symbol」。
 
@@ -103,20 +104,35 @@ Cloudflare Workers Free plan 對 **每次** invocation（cron `scheduled` 與 `f
 
 ⚠️ **超過 10ms 不一定會立刻失敗**，所以不能用「沒掛掉」判斷安全。[官方文件](https://developers.cloudflare.com/workers/platform/limits/#cpu-time)：每個 isolate 有內建彈性容忍*偶爾*超標，但「If your Worker starts hitting the limit **consistently**, its execution will be terminated」。也就是說穩定超標的 invocation 是在寬限期內跑，隨時可能被開始終止。
 
-**實測（2026-08-10 17:18，`wrangler tail`，窗口已滿載）**：
+**實測（2026-08-30 21:00，`wrangler tail`，`BATCH_SIZE = 1`）**：
 
 | invocation | CPU | 說明 |
 |---|---|---|
-| `/run` orchestrator | 3ms | 只做 fan-out 與 symbols.json |
-| `/collect` batch（3 symbols） | **13ms / 14ms** | ⚠️ 穩定超標，靠 isolate 寬限在跑 |
-| `/collect` batch（1 symbol） | 7ms | |
-| `/alerts`（7 symbols × 96 筆，state 17KB） | 3ms | 含 parse + z-score + stringify |
+| cron orchestrator | 5ms | fan-out 8 batch + symbols.json |
+| `/collect`（RIVER，batch 0） | **12ms** | ⚠️ 仍超標，見下 |
+| `/collect`（BTC，batch 1） | 8-10ms | |
+| `/collect`（其餘 6 個） | 5-6ms | |
+| `/alerts`（8 symbols，state 25.6KB） | 4-9ms | 含 parse + z-score + stringify |
 
-由 1 symbol 7ms、3 symbols 13.5ms 反推：固定開銷約 3.75ms，每個 symbol 約 3.25ms。`BATCH_SIZE = 3` 因此註定落在 13ms 附近。最可能的主因是 `appendDayShard` 讀回當日 shard 再字串串接寫回 —— 當日檔案隨時間變大，所以**同一份程式碼在深夜的 CPU 會比清晨高**，這正是下面那條設計準則要避免的 pattern，只是被 sharding 縮小到「單日」而非消除。
+舊實測（2026-08-10，`BATCH_SIZE = 3`）是 13ms / 14ms，由 1 symbol 7ms、3 symbols 13.5ms 反推：固定開銷約 3.75ms，每個 symbol 約 3.25ms。`BATCH_SIZE = 3` 因此註定落在 13ms 附近。主因是 `appendDayShard` 讀回當日 shard 再字串串接寫回 —— 當日檔案隨時間變大，所以**同一份程式碼在深夜的 CPU 會比清晨高**，這正是下面那條設計準則要避免的 pattern，只是被 sharding 縮小到「單日」而非消除。
+
+⚠️ **`BATCH_SIZE` 是這個專案最危險的一個常數**。調大它會等比放大每個 invocation 的 CPU，而超標不會立刻報錯（見上），所以改完當下看起來永遠是好的 —— 代價會在幾週後以整片停機的形式出現。見下方 2026-08-30 事故。
+
+⚠️ batch 0 / batch 1 目前仍在 10-12ms。同一個 symbol 換到後面的 batch 就只要 5-6ms，所以這不是 RIVER 或 BTC 本身貴，而是**先抵達的 invocation 承擔了 isolate 初始化**。目前 8 個裡有 1-2 個超標（事故前是 3 個全超），靠寬限在跑，還沒解決。
 
 歷史教訓（2026-05-14）：原本 cron 每次都 `JSON.parse` ~1.8MB 的 `history_full.json` 再 `JSON.stringify` 寫回 R2，當 history 累積到 3000 筆上限後，CPU 穩定超過 10ms，cron 連續失敗 10 次。改成每日 NDJSON 分片（純文字 append，當日檔 ≤ ~60KB）後 CPU 壓到 ms 級。
 
-**未來新功能設計準則**：cron 內**避免**讀 → parse → modify → stringify → 寫回的「讀寫大物件」pattern，尤其是會隨時間增長的累積資料。改用 append-only 或 sharding。
+歷史教訓（2026-08-30，停機 5 小時）：上面那條「穩定超標隨時可能被開始終止」的警告在 8/10 就寫下了，8/30 15:15 兌現。Cloudflare 開始實際執行 10ms 上限，`BATCH_SIZE = 3` 的三個 `/collect` 全部 `outcome: exceededCpu` 被終止，orchestrator 從 service binding 收到 `HTTP 503`，連續 20 輪 cron 顆粒無收，直到 20:45 改成 `BATCH_SIZE = 1` 才恢復。
+
+這次事故的三個 debug 陷阱，下次可以少走：
+
+1. **外層全綠不代表沒事**。DO proxy `/health` 200、Caddy 正常、Binance 直連 200 —— 因為斷點在 Worker 內部，proxy 那層根本沒被打到。
+2. **手動 `/run` 會成功，cron 卻失敗**。同一份程式碼、同一條路徑，差別只在 isolate 對*偶爾*超標的寬限：手動觸發是孤立的一次，落在寬限內；cron 每 15 分鐘固定超標，被判定為 consistently 而持續終止。所以「我手動打過了，是好的」不能用來排除 CPU 問題。
+3. **`error` 欄的 `HTTP 503` 不在 proxy 的錯誤對照表裡**，它來自 `env.SELF.fetch`，是 Worker 打自己。錯誤訊息不帶 URL（`Error: HTTP 503`）就是這個來源的特徵 —— 帶 URL 的才是 Binance 那層（`fetchJson` 會附上）。
+
+唯一能直接看到真相的是 `npx wrangler tail --format=json` 裡的 `outcome` 欄位，`exceededCpu` 寫得清清楚楚。狀態不明時先開 tail 等一輪 cron，比從外往內猜快得多。
+
+**未來新功能設計準則**：cron 內**避免**讀 → parse → modify → stringify → 寫回的「讀寫大物件」pattern，尤其是會隨時間增長的累積資料。改用 append-only 或 sharding。`alerts/state.json` 目前正是這個 pattern（25.6KB，隨 symbol 數線性增長，`/alerts` 已經跑到 9ms），是下一個要處理的地方。
 
 ---
 
@@ -379,6 +395,7 @@ curl https://smart-money-collector.andychien-design.workers.dev/data/symbols.jso
 如果出現 `stale: true`，代表這一輪該 symbol 收集失敗，顯示的是上一輪的數字（dashboard 會把它淡化但仍可點）。`last_ts` 會停在上次成功的時間，`error` 欄記錄這輪的失敗原因。偶爾一兩輪屬正常；連續多輪就照下面的 `error` 對照排查。
 
 `has_data: false` 只會出現在「從來沒收集成功過」的 symbol（例如剛加進 `SYMBOLS_META` 還沒跑過第一輪）。看 `error` 欄判斷：
+- `Error: HTTP 503`（**不帶 URL**）— 這條不是 proxy 的問題。它來自 `env.SELF.fetch`，代表 `/collect` sub-invocation 被 Cloudflare 以 `exceededCpu` 終止。`wrangler tail` 看 `outcome` 確認，處理方式見上方「Worker CPU 預算」。注意帶 URL 的（`HTTP 503 ... for https://...`）才是下面那些 proxy / Binance 的狀況
 - `HTTP 451` — Binance 開始封 DO 那台 IP（可能性低，DO Singapore IP 信譽乾淨）。換掉 DO 那台、或加更多出口
 - `HTTP 530` / `HTTP 525` — Caddy 那層問題（cert 沒簽到、systemd 沒啟動）
 - `HTTP 502` from proxy — proxy.mjs 連不到 Binance（DNS / network issue），少見
