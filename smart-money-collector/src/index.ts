@@ -581,7 +581,95 @@ async function runCollection(env: Env) {
 			`(${batches.length} batches)` +
 			(stale ? `, ${stale} carried forward from the previous cycle` : ""),
 	);
+	await notifyOutage(env, ok, summary.length, summary);
 	return { ok, stale, total: summary.length, alerts, summary: merged };
+}
+
+// A cycle that collects nothing looks like nothing from the outside:
+// symbols.json goes on serving the previous numbers under stale:true, the
+// dashboard goes on rendering them, and no one is told. That is how the
+// 2026-08-30 outage ran for five hours unnoticed. This is the one thing that
+// would have caught it inside 15 minutes.
+//
+// Only a *total* failure pushes. One or two symbols failing is ordinary (see
+// README "狀態檢查"), and paging on that would teach us to ignore the channel.
+const OUTAGE_KEY = "alerts/outage.json";
+const OUTAGE_REMINDER_MS = 2 * 60 * 60 * 1000;
+
+type OutageState = { since: number; notified: number };
+
+function fmtOutageDuration(ms: number): string {
+	const mins = Math.round(ms / 60000);
+	if (mins < 60) return `${mins} 分鐘`;
+	return `${Math.floor(mins / 60)} 小時 ${mins % 60} 分`;
+}
+
+function escHtml(s: string): string {
+	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+async function pushTelegram(env: Env, text: string): Promise<void> {
+	if (!env.TG_BOT_TOKEN || !env.TG_CHAT_ID) return;
+	await sendTelegram(env.TG_BOT_TOKEN, env.TG_CHAT_ID, text);
+}
+
+async function notifyOutage(
+	env: Env,
+	ok: number,
+	total: number,
+	summary: SummaryEntry[],
+): Promise<void> {
+	// Nothing in here may cost us the cycle's data, which is the one thing that
+	// cannot be recreated later. Same reasoning as runAlertPass.
+	try {
+		// On a healthy cycle with no outage on record this is one R2 miss and an
+		// early return, so the normal path pays almost nothing.
+		const obj = await env.DATA.get(OUTAGE_KEY);
+		const prev = obj ? await obj.json<OutageState>() : null;
+		const now = Date.now();
+
+		if (ok > 0) {
+			if (!prev) return;
+			await env.DATA.delete(OUTAGE_KEY);
+			await pushTelegram(
+				env,
+				"✅ <b>收集已恢復</b>\n\n" +
+					`停了 ${fmtOutageDuration(now - prev.since)}，` +
+					`這一輪 ${ok}/${total} 個 symbol 正常。`,
+			);
+			return;
+		}
+
+		// Still down: re-push on a timer rather than every 15 minutes. A 5-hour
+		// outage would otherwise be 20 identical messages.
+		if (prev && now - prev.notified < OUTAGE_REMINDER_MS) return;
+
+		const since = prev?.since ?? now;
+		await env.DATA.put(
+			OUTAGE_KEY,
+			JSON.stringify({ since, notified: now } satisfies OutageState),
+			{ httpMetadata: { contentType: "application/json" } },
+		);
+
+		const errors = [...new Set(summary.map((s) => s.error).filter(Boolean))];
+		// Spelled out in the push itself: a 503 carrying no URL is the service
+		// binding — our own /collect being killed for CPU — and it is the one
+		// error here that reads like a proxy problem while not being one.
+		const cpuHint = errors.some((e) => e === "Error: HTTP 503")
+			? "\n\n不帶 URL 的 <code>HTTP 503</code> = /collect 被 Cloudflare 以 " +
+				"exceededCpu 終止，見 README「Worker CPU 預算」。"
+			: "";
+
+		await pushTelegram(
+			env,
+			"🔴 <b>收集全數失敗</b>\n\n" +
+				`${ok}/${total} 個 symbol，已持續 ${fmtOutageDuration(now - since)}。\n` +
+				`錯誤：<code>${escHtml(errors.join(" / ") || "（無）")}</code>` +
+				cpuHint,
+		);
+	} catch (e) {
+		console.error("[ERROR] outage notify failed:", e);
+	}
 }
 
 // Detection runs in its own sub-invocation (POST /alerts) for a fresh 10ms CPU
