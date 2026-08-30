@@ -64,7 +64,6 @@ function warmUp(
 describe("detect", () => {
 	it("stays quiet during warm-up, and warm-up itself never fires", () => {
 		const { state, ms } = warmUp(20);
-		expect(state.recent).toEqual([]);
 		// A huge jump still cannot be scored without enough history behind it.
 		expect(detect(state, [sample({ sm_ls_ratio: 2.5 })], ms, TS)).toEqual([]);
 	});
@@ -81,7 +80,6 @@ describe("detect", () => {
 		expect(fired).toHaveLength(1);
 		expect(fired[0]).toMatchObject({ symbol: "sol", metric: "ls", dir: "up" });
 		expect(Math.abs(fired[0].z)).toBeGreaterThan(2.5);
-		expect(state.recent).toHaveLength(1);
 	});
 
 	it("fires on a jump in one side's notional", () => {

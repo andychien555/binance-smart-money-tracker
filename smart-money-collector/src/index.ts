@@ -4,7 +4,9 @@ import {
 	backfill,
 	detect,
 	formatMessage,
+	loadRecent,
 	loadState,
+	saveRecent,
 	saveState,
 	sendTelegram,
 } from "./alerts";
@@ -624,6 +626,10 @@ async function processAlerts(
 	await saveState(env.DATA, state);
 	if (!fired.length) return { fired: 0 };
 
+	// Only from here on — the quiet cycles, which are nearly all of them, never
+	// read or write the fired log at all.
+	await saveRecent(env.DATA, fired, await loadRecent(env.DATA));
+
 	console.log(
 		`[ALERT] ${fired.length} fired: ` +
 			fired
@@ -879,8 +885,7 @@ export default {
 		// What has fired recently, newest first — the feedback loop for tuning
 		// the thresholds in alerts.ts.
 		if (p === "/data/alerts.json") {
-			const state = await loadState(env.DATA);
-			return jsonResponse({ recent: state.recent });
+			return jsonResponse({ recent: await loadRecent(env.DATA) });
 		}
 
 		const dayIdxMatch = p.match(/^\/data\/([a-z0-9]+)\/days\/index\.json$/);

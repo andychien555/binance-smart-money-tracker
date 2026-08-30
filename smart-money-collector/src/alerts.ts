@@ -102,13 +102,19 @@ export type AlertRecord = {
 export type AlertState = {
 	v: 1;
 	sym: Record<string, SymbolState>;
-	recent: AlertRecord[];
 };
 
 export const STATE_KEY = "alerts/state.json";
 
+// The fired log lives in its own object rather than inside the state. Detection
+// never reads it — it only ever prepends — but keeping it here made every cron
+// tick parse and re-serialise it anyway: 10KB of the state's 25.6KB, 96 times a
+// day, to append something roughly twice a day. Split out, the hot path only
+// touches `sym`, and this is read/written on the rare cycle that fires.
+export const RECENT_KEY = "alerts/recent.json";
+
 export function emptyState(): AlertState {
-	return { v: 1, sym: {}, recent: [] };
+	return { v: 1, sym: {} };
 }
 
 export async function loadState(bucket: R2Bucket): Promise<AlertState> {
@@ -117,7 +123,6 @@ export async function loadState(bucket: R2Bucket): Promise<AlertState> {
 		if (!obj) return emptyState();
 		const parsed = (await obj.json()) as AlertState;
 		if (parsed?.v !== 1 || !parsed.sym) return emptyState();
-		parsed.recent ??= [];
 		return parsed;
 	} catch (e) {
 		// A corrupt state file must not stall collection: start over. The cost is
@@ -127,8 +132,36 @@ export async function loadState(bucket: R2Bucket): Promise<AlertState> {
 	}
 }
 
+// Rebuilt field by field rather than serialising `state` as-is: a state read
+// back from before the split still carries a `recent` array, and writing the
+// object whole would carry it forward forever.
 export function saveState(bucket: R2Bucket, state: AlertState): Promise<unknown> {
-	return bucket.put(STATE_KEY, JSON.stringify(state), {
+	return bucket.put(STATE_KEY, JSON.stringify({ v: state.v, sym: state.sym }), {
+		httpMetadata: { contentType: "application/json" },
+	});
+}
+
+export async function loadRecent(bucket: R2Bucket): Promise<AlertRecord[]> {
+	try {
+		const obj = await bucket.get(RECENT_KEY);
+		if (!obj) return [];
+		const parsed = await obj.json<unknown>();
+		return Array.isArray(parsed) ? (parsed as AlertRecord[]) : [];
+	} catch (e) {
+		// Same reasoning as loadState: the fired log is a record, not an input to
+		// detection, so losing it must never cost us the alert pass.
+		console.error("[ERROR] recent alerts unreadable, resetting:", e);
+		return [];
+	}
+}
+
+export function saveRecent(
+	bucket: R2Bucket,
+	fired: AlertRecord[],
+	previous: AlertRecord[],
+): Promise<unknown> {
+	const merged = [...fired, ...previous].slice(0, MAX_RECENT);
+	return bucket.put(RECENT_KEY, JSON.stringify(merged), {
 		httpMetadata: { contentType: "application/json" },
 	});
 }
@@ -189,6 +222,13 @@ function passesFloor(metric: Metric, r: Score): boolean {
 // Fold this cycle's samples into the rolling window and return whatever crossed
 // the bar. Mutates `state` — the caller persists it whether or not anything
 // fired, since the window must keep growing either way.
+// Stored at display precision. The raw values carry ~17 significant digits
+// (z: 21.173813535560175), which is ~30 bytes each in the fired log for
+// precision nothing reads back — formatMessage prints z to 1 decimal and pct
+// as a whole percent.
+const round4 = (n: number) => Math.round(n * 1e4) / 1e4;
+const round2 = (n: number) => Math.round(n * 1e2) / 1e2;
+
 export function detect(
 	state: AlertState,
 	samples: AlertSample[],
@@ -234,7 +274,9 @@ export function detect(
 				dir: "up",
 				from: prevLs,
 				to: s.sm_ls_ratio,
-				pct: (s.sm_ls_ratio - prevLs) / Math.max(Math.abs(prevLs), 1e-9),
+				pct: round4(
+					(s.sm_ls_ratio - prevLs) / Math.max(Math.abs(prevLs), 1e-9),
+				),
 				z: 0, // not applicable — this is a level, not a deviation
 				price: s.price,
 				price_change_pct: s.price_change_pct,
@@ -270,17 +312,14 @@ export function detect(
 				dir: r.delta >= 0 ? "up" : "down",
 				from: r.from,
 				to: r.to,
-				pct: r.pct,
-				z: r.z,
+				pct: round4(r.pct),
+				z: round2(r.z),
 				price: s.price,
 				price_change_pct: s.price_change_pct,
 			});
 		}
 	}
 
-	if (fired.length) {
-		state.recent = [...fired, ...state.recent].slice(0, MAX_RECENT);
-	}
 	return fired;
 }
 
