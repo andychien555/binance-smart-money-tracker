@@ -407,13 +407,19 @@ curl https://smart-money-collector.andychien-design.workers.dev/data/symbols.jso
 
 debug 步驟與恢復方式 → [proxy/README.md](proxy/README.md)。
 
-### 自動健康檢查
+### 停機自動通知
 
-有一個 Claude Code routine（雲端排程）每 6 小時跑一次，台北時間 02:17 / 08:17 / 14:17 / 20:17：
+2026-08-30 的停機之所以能撐五個小時沒被發現，是因為**從外面看什麼事都沒有**：symbols.json 照常回應，只是每筆都掛著 `stale: true`；dashboard 照常渲染上一輪的數字；沒有任何東西會開口。orchestrator 其實一直都知道 `ok` 是多少，只是從來沒說出來。
 
-1. 讀 `symbols.json` 看 `last_ts` 是否在 20 分鐘內、有沒有 `stale` / `error`
-2. 數當日分片的行數，比對「這個時間點應該要有幾筆」
-3. 發現 stale 就先打 `/run` 補一輪
-4. 仍有問題才開 GitHub issue（正常時不開，不會洗版）
+現在 `notifyOutage()`（[src/index.ts](smart-money-collector/src/index.ts)）會在**整輪全滅**時推 Telegram：
 
-管理介面在 <https://claude.ai/code/routines>。它跑在 Anthropic 雲端，**看不到 CPU 數字**（那要本機 `wrangler tail` 的認證），所以它盯的是「有沒有漏收」這個後果，而不是 CPU 本身。真的要看 CPU 還是得在本機開 tail 等一輪 cron。
+- 只在 `ok === 0` 時推。一兩個 symbol 失敗是常態（見上面的 `error` 對照表），為那個推播只會訓練我們忽略這個頻道
+- 還沒好的話每 2 小時重推一次，不是每一輪 —— 五小時的停機是 3 則訊息而不是 20 則
+- 恢復時推一則，講停了多久
+- 看到不帶 URL 的 `Error: HTTP 503` 會在訊息裡直接點名 CPU 這個成因，因為那是這個系統裡唯一一個「看起來像 proxy 壞掉、其實不是」的錯誤
+
+狀態存在 `alerts/outage.json`，**只在異常時才存在**。正常那一輪就是一次 R2 miss 然後直接 return，所以這個監控在健康路徑上幾乎不花 CPU —— 這點很重要，畢竟 CPU 正是這次的病根。整個函式包在 try/catch 裡：監控壞掉絕不能賠掉那一輪的資料。
+
+沒設 `TG_BOT_TOKEN` / `TG_CHAT_ID` 的話這個功能靜默跳過，收集本身不受影響。
+
+**盲點**：這條路徑靠 cron 有跑才成立。如果 Cloudflare 連 cron 都不觸發了（這次不是這種情況 —— orchestrator 有跑，是它的 `/collect` 全被砍），Worker 就沒有機會開口，那需要外部監控。曾經試過用 Claude Code 的雲端 routine 做這件事，但它的 egress proxy 擋掉了 `*.workers.dev`，連不到自己的端點，所以改走這條路。
