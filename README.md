@@ -82,6 +82,7 @@
 │  symbols.json          │    │   └─ reverse_proxy → :8787      │
 │  meta.json             │    │                                 │
 │  alerts/state.json     │    │                                 │
+│  alerts/recent.json    │    │                                 │
            ▲                  │ systemd: binance-proxy.service  │
            │ fetch (CORS)     │   └─ node proxy.mjs (port 8787) │
 ┌──────────┴───────────┐      └────────────────┬────────────────┘
@@ -112,7 +113,7 @@ Cloudflare Workers Free plan 對 **每次** invocation（cron `scheduled` 與 `f
 | `/collect`（RIVER，batch 0） | **12ms** | ⚠️ 仍超標，見下 |
 | `/collect`（BTC，batch 1） | 8-10ms | |
 | `/collect`（其餘 6 個） | 5-6ms | |
-| `/alerts`（8 symbols，state 25.6KB） | 4-9ms | 含 parse + z-score + stringify |
+| `/alerts`（8 symbols，state 15.5KB） | 5ms | 含 parse + z-score + stringify。拆掉 `recent` 前是 25.6KB / 9ms |
 
 舊實測（2026-08-10，`BATCH_SIZE = 3`）是 13ms / 14ms，由 1 symbol 7ms、3 symbols 13.5ms 反推：固定開銷約 3.75ms，每個 symbol 約 3.25ms。`BATCH_SIZE = 3` 因此註定落在 13ms 附近。主因是 `appendDayShard` 讀回當日 shard 再字串串接寫回 —— 當日檔案隨時間變大，所以**同一份程式碼在深夜的 CPU 會比清晨高**，這正是下面那條設計準則要避免的 pattern，只是被 sharding 縮小到「單日」而非消除。
 
@@ -132,7 +133,9 @@ Cloudflare Workers Free plan 對 **每次** invocation（cron `scheduled` 與 `f
 
 唯一能直接看到真相的是 `npx wrangler tail --format=json` 裡的 `outcome` 欄位，`exceededCpu` 寫得清清楚楚。狀態不明時先開 tail 等一輪 cron，比從外往內猜快得多。
 
-**未來新功能設計準則**：cron 內**避免**讀 → parse → modify → stringify → 寫回的「讀寫大物件」pattern，尤其是會隨時間增長的累積資料。改用 append-only 或 sharding。`alerts/state.json` 目前正是這個 pattern（25.6KB，隨 symbol 數線性增長，`/alerts` 已經跑到 9ms），是下一個要處理的地方。
+**未來新功能設計準則**：cron 內**避免**讀 → parse → modify → stringify → 寫回的「讀寫大物件」pattern，尤其是會隨時間增長的累積資料。改用 append-only 或 sharding。
+
+`alerts/state.json` 曾經是這個 pattern 的第二個實例：25.6KB，`/alerts` 跑到 9ms。其中 39%（10.1KB）是 `recent` 這份已觸發紀錄 —— 偵測邏輯從不讀它、只在觸發時 prepend，但它卻跟著被每 15 分鐘 parse + stringify 一次，一天 96 次，只為了大約 2 次的寫入。2026-08-30 把它拆成獨立的 `alerts/recent.json`，只在真的觸發的那一輪才讀寫，state 降到 15.5KB、CPU 降到 5ms。**判斷準則**：問「這個欄位在每次 cron 都會被讀嗎？」不會的話它就不該待在熱路徑的物件裡。
 
 ---
 
@@ -403,3 +406,14 @@ curl https://smart-money-collector.andychien-design.workers.dev/data/symbols.jso
 - `HTTP 5xx` from Binance — Binance 短暫故障，下個 cron 通常會恢復
 
 debug 步驟與恢復方式 → [proxy/README.md](proxy/README.md)。
+
+### 自動健康檢查
+
+有一個 Claude Code routine（雲端排程）每 6 小時跑一次，台北時間 02:17 / 08:17 / 14:17 / 20:17：
+
+1. 讀 `symbols.json` 看 `last_ts` 是否在 20 分鐘內、有沒有 `stale` / `error`
+2. 數當日分片的行數，比對「這個時間點應該要有幾筆」
+3. 發現 stale 就先打 `/run` 補一輪
+4. 仍有問題才開 GitHub issue（正常時不開，不會洗版）
+
+管理介面在 <https://claude.ai/code/routines>。它跑在 Anthropic 雲端，**看不到 CPU 數字**（那要本機 `wrangler tail` 的認證），所以它盯的是「有沒有漏收」這個後果，而不是 CPU 本身。真的要看 CPU 還是得在本機開 tail 等一輪 cron。
