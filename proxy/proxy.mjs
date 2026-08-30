@@ -69,10 +69,24 @@ http
 				redirect: "manual",
 			});
 			const buf = Buffer.from(await upstreamRes.arrayBuffer());
+			// fetch() already decompressed the body, so the upstream's
+			// content-encoding no longer describes what we are sending — and
+			// neither does its content-length, which counts the *compressed*
+			// bytes. Forwarding that length makes Node truncate the decoded body
+			// to it: web3.binance.com answers gzipped with content-length 1359
+			// for 3496 bytes of JSON, so the Worker received 1359 bytes and died
+			// on "Unterminated string in JSON at position 1349". fapi answers
+			// chunked (no content-length), which is why only the web3 endpoint
+			// ever broke. Drop all three and let res.end() set the real length.
 			const outHeaders = {};
 			upstreamRes.headers.forEach((v, k) => {
 				const lk = k.toLowerCase();
-				if (lk === "content-encoding" || lk === "transfer-encoding") return;
+				if (
+					lk === "content-encoding" ||
+					lk === "transfer-encoding" ||
+					lk === "content-length"
+				)
+					return;
 				outHeaders[k] = v;
 			});
 			res.writeHead(upstreamRes.status, outHeaders);

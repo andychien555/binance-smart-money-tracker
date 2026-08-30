@@ -134,6 +134,7 @@ curl -H "x-proxy-token: $(grep PROXY_SECRET /root/.openclaw/workspace/mac-proxy/
 | 外面 curl `nip.io` 連不上 | UFW 沒開 / DO network drop | 看 `ufw status` 確認 80/443 開、DO control panel 確認 instance running |
 | `journalctl -u caddy` 一直跑 ACME challenge 失敗 | 80 port 沒開 / nip.io DNS 故障 | UFW 確認 80 開；nip.io 罕見壞，用 `dig 167.172.64.49.nip.io` 確認解析 |
 | 完整重啟整套 | 不確定哪壞 | `systemctl restart binance-proxy caddy` |
+| Worker log 出現 `SyntaxError: Unterminated string in JSON` | proxy 轉發了上游的 `content-length`，但 body 已被 `fetch()` 解壓，長度對不上，Node 依壓縮後的長度把 body 截斷 | 已於 2026-08-30 修掉（`proxy.mjs` 連 `content-length` 一起丟掉）。只影響**帶 content-length 的上游**：`web3.binance.com` 會，`fapi` 是 chunked 所以從來沒中招 |
 
 ## 怎麼新增 Binance 主機 / 路由 prefix
 
