@@ -43,15 +43,25 @@ const SYMBOLS_META: SymbolMeta[] = [
 	{ symbol: "LITUSDT", short: "lit", label: "LIT/USDT" },
 	{ symbol: "LABUSDT", short: "lab", label: "LAB/USDT" },
 	{ symbol: "BEATUSDT", short: "beat", label: "BEAT/USDT" },
+	{ symbol: "ZECUSDT", short: "zec", label: "ZEC/USDT" },
 ];
 
-// Cloudflare Workers (Free) caps each invocation at 50 fetch() subrequests.
-// Each symbol costs ~10-11 subrequests, so all symbols in one invocation blows
-// the limit (the tail-end depth/aggTrades fetches start failing). Instead the
-// cron fans out into batches, each run as its OWN sub-invocation (via a self
-// fetch to /collect?batch=N) so each gets a fresh 50-subrequest budget.
+// Cloudflare Workers (Free) caps each invocation at 50 fetch() subrequests AND
+// at 10ms CPU. Each symbol costs ~10-11 subrequests, so all symbols in one
+// invocation blows the subrequest limit (the tail-end depth/aggTrades fetches
+// start failing). Instead the cron fans out into batches, each run as its OWN
+// sub-invocation (via a self fetch to /collect?batch=N) so each gets a fresh
+// budget of both.
+//
+// CPU is the binding constraint, not subrequests. Measured: ~3.75ms fixed
+// overhead + ~3.25ms per symbol, so 3 symbols/batch lands at ~13.5ms — over the
+// 10ms cap. That ran for months on the isolate's tolerance for *occasional*
+// overruns, until 2026-08-30 15:15 when Cloudflare started enforcing it and
+// every /collect came back exceededCpu (the orchestrator saw HTTP 503 from the
+// service binding). One symbol per sub-invocation puts it at ~7ms, inside the
+// cap with room for the day shard to grow. Raising this is what broke it.
 const SELF_ORIGIN = "https://smart-money-collector.andychien-design.workers.dev";
-const BATCH_SIZE = 3; // symbols per sub-invocation (worst case ~32 subrequests)
+const BATCH_SIZE = 1; // symbols per sub-invocation (~11 subrequests, ~7ms CPU)
 
 function getBatches(): SymbolMeta[][] {
 	const batches: SymbolMeta[][] = [];
