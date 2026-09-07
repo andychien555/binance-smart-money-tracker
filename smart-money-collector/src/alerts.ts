@@ -70,9 +70,15 @@ const GATE_MIN_DELTA = 0.1; // the crossing step must move the ratio this much
 const GATE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
 // Which symbols the gate watches. Deliberately not on BTC/ETH/SOL: the signal
-// is about small caps, and the majors cross 2 often enough to drown it out
-// (BTC spent 29% of its history above 2). Add new small caps here.
-const GATE_SYMBOLS = new Set(["river", "lit", "marscoin"]);
+// is about thin books, and the majors cross 2 often enough to drown it out
+// (BTC spent 29% of its history above 2). Add new thin-book symbols here.
+//
+// soxl is the one non-coin in the set and has no history here yet, so it is in
+// on the assumption that a TradFi perp's book behaves like a small cap rather
+// than like a major. It sat at 2.72 when it was added, so the first firing
+// waits for it to drop below 2 and cross back up. Worth re-checking against
+// its own recorded history once there is some.
+const GATE_SYMBOLS = new Set(["river", "lit", "marscoin", "soxl"]);
 
 // --- state ----------------------------------------------------------------
 // Compact on purpose: the whole object is parsed and re-serialised every cron
