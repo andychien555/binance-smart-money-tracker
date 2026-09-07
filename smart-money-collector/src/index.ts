@@ -44,7 +44,6 @@ const SYMBOLS_META: SymbolMeta[] = [
 	{ symbol: "SOLUSDT", short: "sol", label: "SOL/USDT" },
 	{ symbol: "LITUSDT", short: "lit", label: "LIT/USDT" },
 	{ symbol: "MARSCOINUSDT", short: "marscoin", label: "MARSCOIN/USDT" },
-	{ symbol: "LABUSDT", short: "lab", label: "LAB/USDT" },
 	{ symbol: "ZECUSDT", short: "zec", label: "ZEC/USDT" },
 ];
 
