@@ -18,6 +18,7 @@
 | LAB/USDT | ✅ | — |
 | BEAT/USDT | ✅ | — |
 | ZEC/USDT | ✅ | — |
+| MARSCOIN/USDT | ✅ | — |
 
 要加減 symbol 見下方「新增 symbol」。前端要不要顯示是另一回事，見「隱藏 / 顯示某個 symbol」。
 
@@ -305,7 +306,7 @@ const SYMBOLS_META: SymbolMeta[] = [
 
 #### 2. 水位訊號（gate）— 小幣多空比突破 2.0
 
-小幣的多空比站上 2 是值得動作的位置，**不管它是急拉上去還是慢慢磨上去的** —— 這是變化訊號抓不到的東西，所以獨立成一條規則。只看 `GATE_SYMBOLS`（river / lit / lab / beat），不看 BTC/ETH/SOL：這訊號講的是小幣，而大盤穿越 2 太頻繁（BTC 有 29% 的時間在 2 以上）會把它淹掉。
+小幣的多空比站上 2 是值得動作的位置，**不管它是急拉上去還是慢慢磨上去的** —— 這是變化訊號抓不到的東西，所以獨立成一條規則。只看 `GATE_SYMBOLS`（river / lit / lab / beat / marscoin），不看 BTC/ETH/SOL：這訊號講的是小幣，而大盤穿越 2 太頻繁（BTC 有 29% 的時間在 2 以上）會把它淹掉。
 
 兩個關鍵設計，都是被實際資料逼出來的：
 

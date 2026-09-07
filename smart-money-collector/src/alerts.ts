@@ -71,7 +71,7 @@ const GATE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 // Which symbols the gate watches. Deliberately not on BTC/ETH/SOL: the signal
 // is about small caps, and the majors cross 2 often enough to drown it out
 // (BTC spent 29% of its history above 2). Add new small caps here.
-const GATE_SYMBOLS = new Set(["river", "lit", "lab", "beat"]);
+const GATE_SYMBOLS = new Set(["river", "lit", "lab", "beat", "marscoin"]);
 
 // --- state ----------------------------------------------------------------
 // Compact on purpose: the whole object is parsed and re-serialised every cron
