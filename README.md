@@ -15,10 +15,9 @@
 | ETH/USDT | ✅ | — |
 | SOL/USDT | ✅ | — |
 | LIT/USDT | ✅ | — |
-| LAB/USDT | ✅ | — |
-| BEAT/USDT | ✅ | — |
-| ZEC/USDT | ✅ | — |
 | MARSCOIN/USDT | ✅ | — |
+| LAB/USDT | ✅ | — |
+| ZEC/USDT | ✅ | — |
 
 要加減 symbol 見下方「新增 symbol」。前端要不要顯示是另一回事，見「隱藏 / 顯示某個 symbol」。
 
@@ -306,11 +305,11 @@ const SYMBOLS_META: SymbolMeta[] = [
 
 #### 2. 水位訊號（gate）— 小幣多空比突破 2.0
 
-小幣的多空比站上 2 是值得動作的位置，**不管它是急拉上去還是慢慢磨上去的** —— 這是變化訊號抓不到的東西，所以獨立成一條規則。只看 `GATE_SYMBOLS`（river / lit / lab / beat / marscoin），不看 BTC/ETH/SOL：這訊號講的是小幣，而大盤穿越 2 太頻繁（BTC 有 29% 的時間在 2 以上）會把它淹掉。
+小幣的多空比站上 2 是值得動作的位置，**不管它是急拉上去還是慢慢磨上去的** —— 這是變化訊號抓不到的東西，所以獨立成一條規則。只看 `GATE_SYMBOLS`（river / lit / lab / marscoin），不看 BTC/ETH/SOL：這訊號講的是小幣，而大盤穿越 2 太頻繁（BTC 有 29% 的時間在 2 以上）會把它淹掉。
 
 兩個關鍵設計，都是被實際資料逼出來的：
 
-- **看「跨越」不看「狀態」**：BEAT 有 **69%** 的時間待在 2 以上，用狀態判斷會每 15 分鐘報一次。只有「前一筆 < 2.0 且這一筆 ≥ 2.0」才算
+- **看「跨越」不看「狀態」**：BEAT（追蹤到 2026-09-07）有 **69%** 的時間待在 2 以上，用狀態判斷會每 15 分鐘報一次。只有「前一筆 < 2.0 且這一筆 ≥ 2.0」才算
 - **跨越必須有幅度**（`GATE_MIN_DELTA` = 0.10）：101 天裡的 23 次原始跨越，超過一半是 `1.996 → 2.005` 這種在門檻線上抖動。用「單步漲幅」而不是「起點要夠低」來擋，是因為後者會漏掉 `1.999 → 4.200` 這種從邊緣直接暴衝的最大事件
 
 gate 有自己的 12 小時冷卻，且**不需要暖機、不受收集中斷影響**（只比對前後兩筆，跨越 2 就是跨越 2）—— 新加的 symbol 隔天就受保護。同一輪若 gate 命中，會跳過該 symbol 的多空比變化檢查，兩者講的是同一件事。
@@ -361,7 +360,7 @@ curl -H "x-internal-token: <PROXY_TOKEN>" \
 5. 從既有歷史補滿窗口，免得等 8 小時（一次一個 symbol，每個會補到 96 筆）：
 
 ```bash
-for s in river btc eth sol lit lab beat; do
+for s in river btc eth sol lit marscoin lab zec; do
   curl -H "x-internal-token: <PROXY_TOKEN>" \
     "https://smart-money-collector.andychien-design.workers.dev/alerts/backfill?symbol=$s"
 done

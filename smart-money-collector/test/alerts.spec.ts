@@ -29,7 +29,7 @@ function sample(over: Partial<AlertSample> = {}): AlertSample {
 	};
 }
 
-const GATED = { short: "beat", label: "BEAT/USDT" };
+const GATED = { short: "lit", label: "LIT/USDT" };
 
 // Feed n cycles of small deterministic jitter, so the detector has a spread to
 // judge the next move against. The jitter is well under every floor, so a
@@ -234,7 +234,7 @@ describe("gate (absolute level)", () => {
 		const { fired } = cross(1.9, 2.1);
 		expect(fired).toHaveLength(1);
 		expect(fired[0]).toMatchObject({
-			symbol: "beat",
+			symbol: "lit",
 			metric: "gate",
 			dir: "up",
 			from: 1.9,
@@ -268,6 +268,7 @@ describe("gate (absolute level)", () => {
 			detect(state, [sample({ ...GATED, sm_ls_ratio: 2.3 })], ms, TS),
 		).toHaveLength(1);
 		// BEAT sat above 2 for 69% of its history — staying there must be silent.
+		// (BEAT itself is no longer tracked; the finding is what shaped the rule.)
 		for (const v of [2.4, 2.5, 2.6, 3.0]) {
 			ms += STEP;
 			expect(

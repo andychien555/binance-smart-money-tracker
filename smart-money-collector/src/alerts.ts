@@ -59,11 +59,12 @@ const MIN_POS_USDT = 0.5; // ...on a side holding >= $0.5M (row unit: millions)
 // matters however gradually the ratio drifted there. Rare by design — 13 times
 // in the 101 days to 2026-08-11.
 //
-// Crossing, not state: BEAT sat above 2 for 69% of its recorded history, so a
-// state check would fire every cycle. And the step has to have some size to it
-// — half of all raw crossings were 1.99 -> 2.00x jitter on the threshold, not
-// a breakout. GATE_MIN_DELTA screens those out while still catching a jump
-// straight from 1.999 to 4.20, which a "must start below 1.90" rule would miss.
+// Crossing, not state: BEAT (tracked until 2026-09-07) sat above 2 for 69% of
+// its recorded history, so a state check would fire every cycle. And the step
+// has to have some size to it — half of all raw crossings were 1.99 -> 2.00x
+// jitter on the threshold, not a breakout. GATE_MIN_DELTA screens those out
+// while still catching a jump straight from 1.999 to 4.20, which a "must
+// start below 1.90" rule would miss.
 const GATE_LEVEL = 2.0;
 const GATE_MIN_DELTA = 0.1; // the crossing step must move the ratio this much
 const GATE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
@@ -71,7 +72,7 @@ const GATE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 // Which symbols the gate watches. Deliberately not on BTC/ETH/SOL: the signal
 // is about small caps, and the majors cross 2 often enough to drown it out
 // (BTC spent 29% of its history above 2). Add new small caps here.
-const GATE_SYMBOLS = new Set(["river", "lit", "lab", "beat", "marscoin"]);
+const GATE_SYMBOLS = new Set(["river", "lit", "lab", "marscoin"]);
 
 // --- state ----------------------------------------------------------------
 // Compact on purpose: the whole object is parsed and re-serialised every cron
