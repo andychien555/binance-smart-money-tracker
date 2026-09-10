@@ -50,6 +50,17 @@ const SYMBOLS_META: SymbolMeta[] = [
 	// but funding is 0 while US equities are closed, which is the venue being
 	// honest, not a failed fetch.
 	{ symbol: "SOXLUSDT", short: "soxl", label: "SOXL/USDT" },
+	// The second TradFi perp and the first commodity one (underlyingType
+	// COMMODITY): CL is the NYMEX ticker for WTI crude, and Binance has no
+	// WTIUSDT. Same API shape again, so nothing here needs special-casing, but
+	// funding reads differently from both the coins and SOXL: it settles every
+	// 4h rather than 8h, and it zeroes out only across the weekend (every period
+	// from 09-05 00:00 to 09-06 20:00 UTC was 0, while CME crude was shut) rather
+	// than every night, because crude trades nearly round the clock on weekdays.
+	// The weekday rate is also persistently negative — all 45 periods to
+	// 2026-09-10 sat between -0.0001 and -0.0023 — which is the shape of this
+	// market, not a signal to read into.
+	{ symbol: "CLUSDT", short: "cl", label: "CL/USDT" },
 ];
 
 // Cloudflare Workers (Free) caps each invocation at 50 fetch() subrequests AND

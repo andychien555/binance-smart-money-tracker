@@ -73,12 +73,18 @@ const GATE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 // is about thin books, and the majors cross 2 often enough to drown it out
 // (BTC spent 29% of its history above 2). Add new thin-book symbols here.
 //
-// soxl is the one non-coin in the set and has no history here yet, so it is in
-// on the assumption that a TradFi perp's book behaves like a small cap rather
-// than like a major. It sat at 2.72 when it was added, so the first firing
-// waits for it to drop below 2 and cross back up. Worth re-checking against
-// its own recorded history once there is some.
-const GATE_SYMBOLS = new Set(["river", "lit", "marscoin", "soxl"]);
+// soxl and cl are the non-coins in the set and neither has history here yet,
+// so both are in on the assumption that a TradFi perp's book behaves like a
+// small cap rather than like a major. Both sat above 2 when they were added
+// (soxl 2.72, cl 4.65), so the first firing on either waits for a drop below 2
+// and a crossing back up.
+//
+// That assumption is a stretch for cl, and knowingly so: measured 2026-09-10,
+// its book held $2.8M within 0.1% of mid, next to SOL's $3.8M and three orders
+// of magnitude past river ($2k) / marscoin ($5k) / lit ($13k). By the thin-book
+// reasoning above it belongs with the majors. It is in anyway, to be judged on
+// its own firing record — the first thing to check if the channel gets noisy.
+const GATE_SYMBOLS = new Set(["river", "lit", "marscoin", "soxl", "cl"]);
 
 // --- state ----------------------------------------------------------------
 // Compact on purpose: the whole object is parsed and re-serialised every cron
