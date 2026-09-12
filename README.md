@@ -48,7 +48,7 @@ LAB 在 2026-09-07 ~ 09-12 停止追蹤過，那段的分片是事後用 [script
 - `/fapi/v1/fundingRate` — 最新資金費率
 - `/futures/data/globalLongShortAccountRatio` — 全市場帳戶多空比（1h）
 - `/futures/data/topLongShortPositionRatio` — Top 交易員持倉多空比（1h）
-- `/futures/data/takerlongshortRatio` — Taker 主動買賣比（1h）
+- `/futures/data/takerlongshortRatio` — Taker 主動買賣比（1h）。⚠️ **2026-09-12 之前的 `taker_*` 全部晚三小時**：當時跟 API 要 3 筆卻讀 `[0]`，而這些端點是舊到新排序，讀到的是最舊那筆。已改成 `limit=1`（永遠是最新那個 bucket，也就是上一個**完整**小時 —— 跟上面兩個會含進行中小時的端點不一樣）。讀跨越那天的歷史時要記得這條線的語意在那裡換過
 - `/fapi/v1/depth?limit=20` — 訂單簿前 20 檔 → 算 bid/ask 總量、最大買賣牆、深度比
 - `/fapi/v1/aggTrades?limit=200` — 近 200 筆聚合成交 → 大單 / 中單 計數、主動買 / 賣 量
 
@@ -292,7 +292,9 @@ node scripts/backfill-gap.mjs --symbol LABUSDT \
 
 `--from` / `--to` 是缺的第一格與最後一格（台北時間、15 分鐘整點、含頭含尾）。已經有的那一格不會被動到，所以重跑安全。
 
-**補得回來的**：`price` / `price_change_pct` / `volume_24h`（15m K 線）、`oi_usdt` / `oi_coin`、`funding_rate`、`global_ls_ratio` / `top_pos_ls_ratio`、`taker_*`、`btc_*`。每一欄都照收集端當下的算法還原，包含 `taker_*` 那個「拿三小時前的 bucket」的既有行為（`collectSymbol` 跟 API 要 3 筆卻讀 `[0]`，而這些端點是舊到新排序）—— 不還原的話這段會變成整條序列裡唯一不同步的一段。
+**補得回來的**：`price` / `price_change_pct` / `volume_24h`（15m K 線）、`oi_usdt` / `oi_coin`、`funding_rate`、`global_ls_ratio` / `top_pos_ls_ratio`、`taker_*`、`btc_*`。每一欄都照收集端的算法還原，接縫才對得起來。
+
+⚠️ `taker_*` 的語意在 2026-09-12 換過（見上方「資料來源」）。腳本現在取最新的 bucket，跟修好後的收集端一致；**要補 2026-09-12 以前的缺口，得把腳本裡的 `bucketAt(taker, t, 1)` 改回 `bucketAt(taker, t, 3)`**，不然補出來的那段會是整條序列裡唯一不晚三小時的一段。LAB 的 09-07 ~ 09-12 就是用 lag 3 補的。
 
 **補不回來的**：`sm_*`、`sm30_*`（smart money 端點只回「現在」，`overview` / `details/stats` 沒有時間參數，`details/list` 的 `timeRange` 最長只吃 `1h`）、`depth_*`、`tape_*`（盤口與逐筆都是當下快照）。這些欄位在補出來的列裡**直接不存在**，不是補 0；每一列會帶 `"backfilled": true` 標記。前端的 series builder 對缺欄位產生 whitespace 點而不是 0，所以圖上不會畫出一條掉到 0 的假線。注意 lightweight-charts 的線圖**不會**因 whitespace 斷線，它會把缺口兩端直接連起來 —— 那是缺口本來就有的樣子（沒有資料點時也是連直線），不是補出來的。
 

@@ -260,10 +260,16 @@ async function collectSymbol(
 	const price = parseFloat(ticker.lastPrice);
 
 	const [takerData, depthData, aggTrades, web3Dynamic] = await Promise.all([
+		// limit=1, like the two ratio endpoints above. It used to ask for 3 and
+		// read [0] — but these endpoints sort oldest first, so [0] was the bucket
+		// three hours behind the current one, and every taker_* value written
+		// before 2026-09-12 is that stale. limit=1 always answers with the newest
+		// bucket (the last COMPLETED hour here, unlike the two above, which
+		// include the hour in progress), so ordering stops mattering.
 		fetchSafe("taker-ratio", () =>
 			fetchJson<any[]>(
 				env,
-				`${baseF}/futures/data/takerlongshortRatio?symbol=${symbol}&period=1h&limit=3`,
+				`${baseF}/futures/data/takerlongshortRatio?symbol=${symbol}&period=1h&limit=1`,
 			),
 		),
 		fetchSafe("depth", () =>
@@ -288,7 +294,9 @@ async function collectSymbol(
 
 	let takerInfo: Record<string, number> = {};
 	if (takerData && takerData.length > 0) {
-		const lt = takerData[0];
+		// Newest last, so raising the limit above cannot quietly bring the
+		// three-hour lag back.
+		const lt = takerData[takerData.length - 1];
 		takerInfo = {
 			taker_buy_sell_ratio: round(parseFloat(lt.buySellRatio), 4),
 			taker_buy_vol: round((parseFloat(lt.buyVol) * price) / 1e6, 2),

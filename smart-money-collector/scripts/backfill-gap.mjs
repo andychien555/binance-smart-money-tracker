@@ -291,13 +291,14 @@ async function buildRows() {
 		const tp = bucketAt(topLs, t, 0);
 		if (tp) row.top_pos_ls_ratio = parseFloat(tp.longShortRatio);
 
-		// takerlongshortRatio's newest bucket is the last COMPLETED hour, and
-		// collectSymbol asks for three and reads [0] — the oldest of them, since
-		// these endpoints answer oldest first. So what the live row records is the
-		// bucket three hours behind the current one. Reproduced rather than
-		// corrected: a rebuilt stretch that alone carried a fresh reading would be
-		// a different series from the one around it.
-		const tk = bucketAt(taker, t, 3);
+		// takerlongshortRatio's newest bucket is the last COMPLETED hour, which is
+		// what collectSymbol records since the 2026-09-12 fix. Before that it
+		// asked for three buckets and read [0] — the oldest, since these endpoints
+		// answer oldest first — so rows written earlier carry the bucket three
+		// hours behind the current one. LAB's 09-07..09-12 stretch was rebuilt
+		// with that three-hour lag to match the rows around it; rebuilding a gap
+		// from before the fix now would need `bucketAt(taker, t, 3)` here again.
+		const tk = bucketAt(taker, t, 1);
 		if (tk) {
 			row.taker_buy_sell_ratio = round(parseFloat(tk.buySellRatio), 4);
 			row.taker_buy_vol = round((parseFloat(tk.buyVol) * price) / 1e6, 2);
