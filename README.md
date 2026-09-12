@@ -28,6 +28,8 @@ SOXL 和 CL 是清單裡僅有的兩個非幣標的，都是 Binance 的 TradFi 
 
 兩者共通的一點：每列都會帶的 BTC 參考價，對非幣標的的參考價值偏低。
 
+LAB 在 2026-09-07 ~ 09-12 停止追蹤過，那段的分片是事後用 [scripts/backfill-gap.mjs](smart-money-collector/scripts/backfill-gap.mjs) 重建的：有價格 / OI / 資金費率 / taker，但**沒有 `sm_*`**（smart money 端點只回「現在」，補不回來）。那幾列帶 `"backfilled": true`，細節見下方「補資料缺口」。
+
 要加減 symbol 見下方「新增 symbol」。前端要不要顯示是另一回事，見「隱藏 / 顯示某個 symbol」。
 
 ---
@@ -159,6 +161,7 @@ Cloudflare Workers Free plan 對 **每次** invocation（cron `scheduled` 與 `f
 │   ├── public/index.html               # 前端（單檔，純 vanilla JS + lightweight-charts）
 │   ├── public/v2.html                  # 舊版前端（同一份 symbols.json / NDJSON 資料源）
 │   ├── scripts/seed-local-r2.sh        # 把線上 R2 抓回本機 miniflare（dev 用）
+│   ├── scripts/backfill-gap.mjs        # 從 Binance 歷史端點補回收集中斷的日分片
 │   ├── scripts/*.mjs                   # 一次性 R2 資料 migration（跑完即可留作紀錄）
 │   ├── wrangler.jsonc                  # cron + R2 binding + assets 設定
 │   ├── package.json
@@ -272,6 +275,30 @@ const SYMBOLS_META: SymbolMeta[] = [
 ```
 
 這個旗標會被寫進 `symbols.json`，兩份 dashboard（`/` 和 `/v2.html`）都讀同一份，所以只要改這一個地方。資料採集不受影響，`/data/xxx/…` 也照樣提供。改完 `npx wrangler deploy` 上線。
+
+---
+
+## 補資料缺口
+
+停止追蹤又加回來、或 cron 掛掉一段時間，日分片就會少掉那一段。[scripts/backfill-gap.mjs](smart-money-collector/scripts/backfill-gap.mjs) 從 Binance 有歷史的端點把那段重建回去：
+
+```bash
+cd smart-money-collector
+node scripts/backfill-gap.mjs --symbol LABUSDT \
+  --from "2026-09-07 15:00" --to "2026-09-12 09:30" --dry-run   # 先看會寫什麼
+node scripts/backfill-gap.mjs --symbol LABUSDT \
+  --from "2026-09-07 15:00" --to "2026-09-12 09:30"
+```
+
+`--from` / `--to` 是缺的第一格與最後一格（台北時間、15 分鐘整點、含頭含尾）。已經有的那一格不會被動到，所以重跑安全。
+
+**補得回來的**：`price` / `price_change_pct` / `volume_24h`（15m K 線）、`oi_usdt` / `oi_coin`、`funding_rate`、`global_ls_ratio` / `top_pos_ls_ratio`、`taker_*`、`btc_*`。每一欄都照收集端當下的算法還原，包含 `taker_*` 那個「拿三小時前的 bucket」的既有行為（`collectSymbol` 跟 API 要 3 筆卻讀 `[0]`，而這些端點是舊到新排序）—— 不還原的話這段會變成整條序列裡唯一不同步的一段。
+
+**補不回來的**：`sm_*`、`sm30_*`（smart money 端點只回「現在」，`overview` / `details/stats` 沒有時間參數，`details/list` 的 `timeRange` 最長只吃 `1h`）、`depth_*`、`tape_*`（盤口與逐筆都是當下快照）。這些欄位在補出來的列裡**直接不存在**，不是補 0；每一列會帶 `"backfilled": true` 標記。前端的 series builder 對缺欄位產生 whitespace 點而不是 0，所以圖上不會畫出一條掉到 0 的假線。注意 lightweight-charts 的線圖**不會**因 whitespace 斷線，它會把缺口兩端直接連起來 —— 那是缺口本來就有的樣子（沒有資料點時也是連直線），不是補出來的。
+
+**保存期限**：`futures/data/*` 那幾個端點只留 30 天，缺口要在一個月內補完。
+
+⚠️ 補當天的分片是對 cron 正在 append 的同一個物件做 read-modify-write。挑剛跑完一輪的時候跑，跑完回頭確認一下那天的分片。
 
 ---
 

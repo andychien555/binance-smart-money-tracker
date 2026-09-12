@@ -754,7 +754,11 @@ function renderCharts(data){
   Object.values(chartReg).forEach(c=>{try{c.chart.remove();}catch(e){}});
   chartReg={};
   if(!data.length) return;
-  const S=k=>{const seen={}; return data.map(d=>({time:parseTime(d.timestamp),value:Number(d[k])||0})).filter(d=>{if(isNaN(d.time)||seen[d.time]) return false; seen[d.time]=1; return true;});};
+  // A row from a backfilled stretch carries only the fields that could be
+  // reconstructed after the fact, so a missing key becomes a whitespace point
+  // ({time} with no value) and the line breaks there. Coercing it to 0 would
+  // draw a five-day plunge to zero that never happened.
+  const S=k=>{const seen={}; return data.map(d=>{const t=parseTime(d.timestamp); const n=d[k]==null?NaN:Number(d[k]); return isFinite(n)?{time:t,value:n}:{time:t};}).filter(d=>{if(isNaN(d.time)||seen[d.time]) return false; seen[d.time]=1; return true;});};
 
   // 1 Price+OI — each series is toggleable via checkboxes (#price-toggles)
   const c1=createChart('chart-price',{height:340,localization:{}});
@@ -835,7 +839,8 @@ function renderCharts(data){
   const c3=createChart('chart-positions');
   if(c3){
     const sd3=S('sm_long_pos_usdt');
-    const sd3short=(()=>{const seen={};return data.map(d=>({time:parseTime(d.timestamp),value:-(Number(d.sm_short_pos_usdt)||0)})).filter(d=>{if(isNaN(d.time)||seen[d.time])return false;seen[d.time]=1;return true;});})();
+    // Mirrored below the baseline, keeping S()'s whitespace points as gaps.
+    const sd3short=S('sm_short_pos_usdt').map(d=>'value' in d?{time:d.time,value:-d.value}:d);
     const s=c3.addBaselineSeries({topLineColor:CHART.bull,topFillColor1:CHART.bullArea45,topFillColor2:CHART.bullArea45,bottomLineColor:'transparent',bottomFillColor1:'transparent',bottomFillColor2:'transparent',baseValue:{type:'price',price:0},lineWidth:1.5,priceScaleId:'left'});
     s.setData(sd3);
     c3.addBaselineSeries({topLineColor:'transparent',topFillColor1:'transparent',topFillColor2:'transparent',bottomLineColor:CHART.bear,bottomFillColor1:CHART.bearArea45,bottomFillColor2:CHART.bearArea45,baseValue:{type:'price',price:0},lineWidth:1.5,priceScaleId:'left'}).setData(sd3short);
