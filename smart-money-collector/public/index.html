@@ -478,7 +478,7 @@ const DATA_BASE='/data';
 // as s.hidden, so both dashboards stay in sync from one edit.
 // Pinned to the bottom of the symbol bar, in this order. Everything else keeps
 // its symbols.json order above them.
-const PINNED_LAST=['river'];
+const PINNED_LAST=['river','lab'];
 const pinRank=s=>{const i=PINNED_LAST.indexOf(s.toLowerCase());return i<0?-1:i;};
 async function fetchSymRecent(sym){
   // Fetch last 2 days of NDJSON for sym → return {latest, prev24h}.

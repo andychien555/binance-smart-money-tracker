@@ -84,7 +84,7 @@ const GATE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 // of magnitude past river ($2k) / marscoin ($5k) / lit ($13k). By the thin-book
 // reasoning above it belongs with the majors. It is in anyway, to be judged on
 // its own firing record — the first thing to check if the channel gets noisy.
-const GATE_SYMBOLS = new Set(["river", "lit", "marscoin", "soxl", "cl"]);
+const GATE_SYMBOLS = new Set(["river", "lit", "lab", "marscoin", "soxl", "cl"]);
 
 // --- state ----------------------------------------------------------------
 // Compact on purpose: the whole object is parsed and re-serialised every cron
