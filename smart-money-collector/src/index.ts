@@ -6,6 +6,8 @@ import {
 	formatMessage,
 	loadRecent,
 	loadState,
+	pruneRecent,
+	pruneState,
 	saveRecent,
 	saveState,
 	sendTelegram,
@@ -63,6 +65,10 @@ const SYMBOLS_META: SymbolMeta[] = [
 	// market, not a signal to read into.
 	{ symbol: "CLUSDT", short: "cl", label: "CL/USDT" },
 ];
+
+// The alert state and the fired log are keyed by short, and neither is rebuilt
+// from scratch, so this is what tells them which keys still have an owner.
+const TRACKED_SHORTS = new Set(SYMBOLS_META.map((m) => m.short));
 
 // Cloudflare Workers (Free) caps each invocation at 50 fetch() subrequests AND
 // at 10ms CPU. Each symbol costs ~10-11 subrequests, so all symbols in one
@@ -731,6 +737,10 @@ async function processAlerts(
 ): Promise<AlertPassResult> {
 	const now = new Date();
 	const state = await loadState(env.DATA);
+	const dropped = pruneState(state, TRACKED_SHORTS);
+	if (dropped.length) {
+		console.log(`[ALERT] dropped untracked windows: ${dropped.join(", ")}`);
+	}
 	const fired = detect(state, samples, now.getTime(), tsTaipei(now));
 
 	// Saved even when nothing fires: the window has to keep growing, and the
@@ -740,7 +750,11 @@ async function processAlerts(
 
 	// Only from here on — the quiet cycles, which are nearly all of them, never
 	// read or write the fired log at all.
-	await saveRecent(env.DATA, fired, await loadRecent(env.DATA));
+	await saveRecent(
+		env.DATA,
+		fired,
+		pruneRecent(await loadRecent(env.DATA), TRACKED_SHORTS),
+	);
 
 	console.log(
 		`[ALERT] ${fired.length} fired: ` +
@@ -997,7 +1011,9 @@ export default {
 		// What has fired recently, newest first — the feedback loop for tuning
 		// the thresholds in alerts.ts.
 		if (p === "/data/alerts.json") {
-			return jsonResponse({ recent: await loadRecent(env.DATA) });
+			return jsonResponse({
+				recent: pruneRecent(await loadRecent(env.DATA), TRACKED_SHORTS),
+			});
 		}
 
 		const dayIdxMatch = p.match(/^\/data\/([a-z0-9]+)\/days\/index\.json$/);

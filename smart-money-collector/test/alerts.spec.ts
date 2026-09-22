@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	type AlertRecord,
 	type AlertSample,
 	type AlertState,
 	WINDOW,
@@ -7,6 +8,8 @@ import {
 	detect,
 	emptyState,
 	formatMessage,
+	pruneRecent,
+	pruneState,
 } from "../src/alerts";
 
 const T0 = Date.UTC(2026, 7, 10, 0, 0, 0);
@@ -395,5 +398,50 @@ describe("backfill", () => {
 
 		backfill(state, "sol", [{ r: 1.2, l: 4, s: 3 }], ms);
 		expect(state.sym.sol.a.ls).toBe(cooldown);
+	});
+});
+
+describe("prune", () => {
+	it("drops windows for symbols no longer tracked, and keeps the rest intact", () => {
+		const { state } = warmUp(40);
+		backfill(state, "marscoin", [{ r: 1.2, l: 4, s: 3 }], T0);
+		const kept = state.sym.sol;
+
+		expect(pruneState(state, new Set(["sol"]))).toEqual(["marscoin"]);
+		expect(state.sym.marscoin).toBeUndefined();
+		expect(state.sym.sol).toBe(kept);
+	});
+
+	it("is a no-op when every window still has an owner", () => {
+		const { state } = warmUp(40);
+
+		expect(pruneState(state, new Set(["sol", "btc"]))).toEqual([]);
+		expect(Object.keys(state.sym)).toEqual(["sol"]);
+	});
+
+	it("filters the fired log by the same set, newest order preserved", () => {
+		const rec = (symbol: string, ts: string): AlertRecord => ({
+			ts,
+			symbol,
+			label: `${symbol.toUpperCase()}/USDT`,
+			metric: "ls",
+			dir: "up",
+			from: 1,
+			to: 2,
+			pct: 1,
+			z: 3,
+			price: 1,
+			price_change_pct: 0,
+		});
+		const log = [
+			rec("sol", "2026-09-22 10:00"),
+			rec("marscoin", "2026-09-21 10:00"),
+			rec("btc", "2026-09-20 10:00"),
+		];
+
+		expect(pruneRecent(log, new Set(["sol", "btc"])).map((r) => r.ts)).toEqual([
+			"2026-09-22 10:00",
+			"2026-09-20 10:00",
+		]);
 	});
 });

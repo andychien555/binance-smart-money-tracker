@@ -184,6 +184,30 @@ export function saveRecent(
 	});
 }
 
+// A symbol dropped from SYMBOLS_META stops being collected, but its window
+// survives in the state file: nothing ever deletes a key, and the whole object
+// is parsed and re-serialised on every cron tick under the 10ms budget. Found
+// 2026-09-22 with beat (untracked since 09-07) and marscoin still holding 96
+// points each — 3.5KB of a 21.2KB state, read and written 96 times a day for
+// symbols nobody watches. Called with the tracked shorts so a removal now
+// collects itself on the next tick, rather than being remembered forever.
+export function pruneState(state: AlertState, tracked: Set<string>): string[] {
+	const dropped = Object.keys(state.sym).filter((s) => !tracked.has(s));
+	for (const s of dropped) delete state.sym[s];
+	return dropped;
+}
+
+// Same reasoning for the fired log, which /data/alerts.json serves: an alert
+// from a symbol that is no longer tracked is a record of something nobody can
+// act on any more. Applied on read, so the endpoint stops serving them at once
+// rather than on whichever later cycle happens to fire.
+export function pruneRecent(
+	list: AlertRecord[],
+	tracked: Set<string>,
+): AlertRecord[] {
+	return list.filter((r) => tracked.has(r.symbol));
+}
+
 function pushSample(series: number[], value: number): number[] {
 	series.push(value);
 	return series.length > WINDOW ? series.slice(-WINDOW) : series;

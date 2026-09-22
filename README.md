@@ -278,6 +278,19 @@ const SYMBOLS_META: SymbolMeta[] = [
 
 ---
 
+## 移除 symbol
+
+把那一列從 `SYMBOLS_META` 拿掉就好（gate 有看它的話，`alerts.ts` 的 `GATE_SYMBOLS` 也要拿掉）。連帶會發生的事：
+
+- **前端自動消失**：兩份 dashboard 的 symbol 列都是從 `symbols.json` 來的，下一輪 cron 重寫後就沒了。網址列還帶著舊 `?symbol=` 的話，前端會退回清單第一個有資料的 symbol，不會卡住
+- **`/data/<short>/*` 開始回 404**：`SYMBOLS_META` 同時也是 short → R2 key 的對照表，查不到就不服務
+- **R2 的歷史分片留著**：`<SYMBOL>/days/*.ndjson` 不會被刪，之後加回來資料還在（LAB 就是這樣回來的）
+- **異動通知的狀態下一輪自己清掉**：`alerts/state.json` 的滾動窗口與 `alerts/recent.json` 的觸發紀錄都按 short 存，`pruneState` / `pruneRecent` 會把沒有主人的 key 丟掉
+
+最後一點是 2026-09-22 補上的：在那之前沒有人刪過 key，所以 beat（2026-09-07 就停止追蹤）和 marscoin 的窗口各還躺著 96 個點，佔了 21.2KB state 的 3.5KB —— 而這份 state 每 15 分鐘就要在 10ms 的預算內 parse 加序列化一次。
+
+---
+
 ## 補資料缺口
 
 停止追蹤又加回來、或 cron 掛掉一段時間，日分片就會少掉那一段。[scripts/backfill-gap.mjs](smart-money-collector/scripts/backfill-gap.mjs) 從 Binance 有歷史的端點把那段重建回去：
