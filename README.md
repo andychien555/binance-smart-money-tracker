@@ -14,8 +14,8 @@
 | BTC/USDT | ✅ | — |
 | ETH/USDT | ✅ | — |
 | SOL/USDT | ✅ | — |
+| SUI/USDT | ✅ | — |
 | LIT/USDT | ✅ | — |
-| MARSCOIN/USDT | ✅ | — |
 | LAB/USDT | ✅ | — |
 | ZEC/USDT | ✅ | — |
 | SOXL/USDT | ✅ | — |
@@ -343,7 +343,7 @@ node scripts/backfill-gap.mjs --symbol LABUSDT \
 
 #### 2. 水位訊號（gate）— 小幣多空比突破 2.0
 
-小幣的多空比站上 2 是值得動作的位置，**不管它是急拉上去還是慢慢磨上去的** —— 這是變化訊號抓不到的東西，所以獨立成一條規則。只看 `GATE_SYMBOLS`（river / lit / lab / marscoin / soxl / cl），不看 BTC/ETH/SOL：這訊號講的是小幣，而大盤穿越 2 太頻繁（BTC 有 29% 的時間在 2 以上）會把它淹掉。
+小幣的多空比站上 2 是值得動作的位置，**不管它是急拉上去還是慢慢磨上去的** —— 這是變化訊號抓不到的東西，所以獨立成一條規則。只看 `GATE_SYMBOLS`（river / lit / lab / soxl / cl），不看 BTC/ETH/SOL：這訊號講的是小幣，而大盤穿越 2 太頻繁（BTC 有 29% 的時間在 2 以上）會把它淹掉。
 
 兩個關鍵設計，都是被實際資料逼出來的：
 
@@ -354,7 +354,9 @@ gate 有自己的 12 小時冷卻，且**不需要暖機、不受收集中斷影
 
 SOXL 和 CL 是這組裡的兩個非幣標的，兩個在這裡都還沒有任何歷史。放進來的前提都是「TradFi 永續的盤口比較像小幣、不像大盤」—— 這是假設，不是實測。加入當下兩者的多空比都已經在門檻之上（SOXL 2.72、CL 4.65），所以第一次觸發都要等它先跌回 2 以下再穿上來。等它們各自累積出一段歷史後，值得回頭驗證這個假設。
 
-CL 這個假設拉得比較硬，而且是明知故放：2026-09-10 實測它中價 ±0.1% 以內的掛單量是 **$2.8M**，貼著 SOL 的 $3.8M，比 river（$2k）/ marscoin（$5k）/ lit（$13k）高了三個數量級 —— 照上面那條「盤口薄」的標準，它其實該歸在大盤那邊。先放進來看它自己的觸發紀錄，如果通知開始變吵，這是第一個該回頭砍掉的。
+CL 這個假設拉得比較硬，而且是明知故放：2026-09-10 實測它中價 ±0.1% 以內的掛單量是 **$2.8M**，貼著 SOL 的 $3.8M，比 river（$2k）/ lit（$13k）高了三個數量級 —— 照上面那條「盤口薄」的標準，它其實該歸在大盤那邊。先放進來看它自己的觸發紀錄，如果通知開始變吵，這是第一個該回頭砍掉的。
+
+反過來，SUI 有收集但**刻意不進 gate**：2026-09-22 實測它中價 ±0.1% 以內的掛單量是 **$230k**、24h 量 $1.04B，比 river / lit 這種小幣厚兩個數量級，量能跟 SOL 同一級。照同一條標準它算大盤，放進來只會多噪音。
 
 ### 防洗版的關卡
 
@@ -402,7 +404,7 @@ curl -H "x-internal-token: <PROXY_TOKEN>" \
 5. 從既有歷史補滿窗口，免得等 8 小時（一次一個 symbol，每個會補到 96 筆）：
 
 ```bash
-for s in river btc eth sol lit marscoin lab zec soxl cl; do
+for s in river btc eth sol sui lit lab zec soxl cl; do
   curl -H "x-internal-token: <PROXY_TOKEN>" \
     "https://smart-money-collector.andychien-design.workers.dev/alerts/backfill?symbol=$s"
 done

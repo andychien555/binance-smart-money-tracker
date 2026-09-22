@@ -81,10 +81,15 @@ const GATE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 //
 // That assumption is a stretch for cl, and knowingly so: measured 2026-09-10,
 // its book held $2.8M within 0.1% of mid, next to SOL's $3.8M and three orders
-// of magnitude past river ($2k) / marscoin ($5k) / lit ($13k). By the thin-book
-// reasoning above it belongs with the majors. It is in anyway, to be judged on
-// its own firing record — the first thing to check if the channel gets noisy.
-const GATE_SYMBOLS = new Set(["river", "lit", "lab", "marscoin", "soxl", "cl"]);
+// of magnitude past river ($2k) / lit ($13k). By the thin-book reasoning above
+// it belongs with the majors. It is in anyway, to be judged on its own firing
+// record — the first thing to check if the channel gets noisy.
+//
+// sui is tracked but deliberately left out: measured 2026-09-22 its book held
+// $230k within 0.1% of mid on $1.04B of 24h volume, two orders of magnitude
+// past the small caps and in SOL's league. It reads as a major here, so the
+// gate would only add noise.
+const GATE_SYMBOLS = new Set(["river", "lit", "lab", "soxl", "cl"]);
 
 // --- state ----------------------------------------------------------------
 // Compact on purpose: the whole object is parsed and re-serialised every cron

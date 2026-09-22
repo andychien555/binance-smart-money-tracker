@@ -42,8 +42,8 @@ const SYMBOLS_META: SymbolMeta[] = [
 	{ symbol: "BTCUSDT", short: "btc", label: "BTC/USDT" },
 	{ symbol: "ETHUSDT", short: "eth", label: "ETH/USDT" },
 	{ symbol: "SOLUSDT", short: "sol", label: "SOL/USDT" },
+	{ symbol: "SUIUSDT", short: "sui", label: "SUI/USDT" },
 	{ symbol: "LITUSDT", short: "lit", label: "LIT/USDT" },
-	{ symbol: "MARSCOINUSDT", short: "marscoin", label: "MARSCOIN/USDT" },
 	{ symbol: "LABUSDT", short: "lab", label: "LAB/USDT" },
 	{ symbol: "ZECUSDT", short: "zec", label: "ZEC/USDT" },
 	// TradFi perp (contractType TRADIFI_PERPETUAL, underlyingType EQUITY), not a
