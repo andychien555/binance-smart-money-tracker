@@ -45,6 +45,7 @@ const SYMBOLS_META: SymbolMeta[] = [
 	{ symbol: "ETHUSDT", short: "eth", label: "ETH/USDT" },
 	{ symbol: "SOLUSDT", short: "sol", label: "SOL/USDT" },
 	{ symbol: "SUIUSDT", short: "sui", label: "SUI/USDT" },
+	{ symbol: "NEARUSDT", short: "near", label: "NEAR/USDT" },
 	{ symbol: "LITUSDT", short: "lit", label: "LIT/USDT" },
 	{ symbol: "LABUSDT", short: "lab", label: "LAB/USDT" },
 	{ symbol: "UAIUSDT", short: "uai", label: "UAI/USDT" },

@@ -15,6 +15,7 @@
 | ETH/USDT | ✅ | — |
 | SOL/USDT | ✅ | — |
 | SUI/USDT | ✅ | — |
+| NEAR/USDT | ✅ | — |
 | LIT/USDT | ✅ | — |
 | LAB/USDT | ✅ | — |
 | UAI/USDT | ✅ | — |
@@ -69,7 +70,7 @@ LAB 在 2026-09-07 ~ 09-12 停止追蹤過，那段的分片是事後用 [script
 │                                                                │
 │    cron trigger: */15 * * * *                                  │
 │      └─ scheduled handler (orchestrator)                       │
-│            ├─ GET /collect?batch=N  ×11 (self service-binding) │
+│            ├─ GET /collect?batch=N  ×12 (self service-binding) │
 │            │     └─ fetch 3 binance hosts × 1 symbol           │
 │            │         (透過 DO proxy，見下) → R2                │
 │            ├─ write symbols.json / meta.json                   │
@@ -109,7 +110,7 @@ LAB 在 2026-09-07 ~ 09-12 停止追蹤過，那段的分片是事後用 [script
 - **DO proxy 中繼**：Binance 從 2026-05-13 起對 CF edge anycast IP 回 451，所以 Worker 不直接打 Binance，改走 DO Singapore 機房（IP 信譽乾淨、Binance 200）→ Caddy HTTPS → Node proxy → Binance。詳見 [proxy/README.md](proxy/README.md)
 - **每日 NDJSON 分片儲存**：每次 cron 只 append 一筆到當日 `<SYMBOL>/days/<YYYY-MM-DD>.ndjson`（純文字 append，不 parse 全量），歷史永久保留。前端依需要的時間區間決定要讀哪幾天的分片。設計理由見下方「Worker CPU 預算」。
 - **CORS / cache**：Worker `/data/*` 路由附 `Access-Control-Allow-Origin: *` 和 `Cache-Control: public, max-age=30`
-- **批次 fan-out**：CF Free plan 每次 invocation 上限 50 subrequests，一個 symbol 要 ~10-11 個，全部塞一次會爆。orchestrator 透過 self service-binding 把 symbol 分批各自打 `/collect?batch=N`，每批拿到全新的 subrequest 預算。`BATCH_SIZE = 1`，所以**批數 = symbol 數**（目前 11）—— 上面架構圖的 ×11 會隨追蹤清單增減而變。異動判斷（`POST /alerts`）同理獨立一個 invocation，見下方「異動通知」
+- **批次 fan-out**：CF Free plan 每次 invocation 上限 50 subrequests，一個 symbol 要 ~10-11 個，全部塞一次會爆。orchestrator 透過 self service-binding 把 symbol 分批各自打 `/collect?batch=N`，每批拿到全新的 subrequest 預算。`BATCH_SIZE = 1`，所以**批數 = symbol 數**（目前 12）—— 上面架構圖的 ×12 會隨追蹤清單增減而變。異動判斷（`POST /alerts`）同理獨立一個 invocation，見下方「異動通知」
 
 ### Worker CPU 預算（重要）
 
@@ -370,7 +371,7 @@ SOXL 和 CL 是這組裡的兩個非幣標的，兩個在這裡都還沒有任�
 
 CL 這個假設拉得比較硬，而且是明知故放：2026-09-10 實測它中價 ±0.1% 以內的掛單量是 **$2.8M**，貼著 SOL 的 $3.8M，比 river（$2k）/ lit（$13k）高了三個數量級 —— 照上面那條「盤口薄」的標準，它其實該歸在大盤那邊。先放進來看它自己的觸發紀錄，如果通知開始變吵，這是第一個該回頭砍掉的。
 
-反過來，SUI 有收集但**刻意不進 gate**：2026-09-22 實測它中價 ±0.1% 以內的掛單量是 **$230k**、24h 量 $1.04B，比 river / lit 這種小幣厚兩個數量級，量能跟 SOL 同一級。照同一條標準它算大盤，放進來只會多噪音。
+反過來，SUI 和 NEAR 有收集但**刻意不進 gate**：實測中價 ±0.1% 以內的掛單量，SUI 是 **$230k**（2026-09-22、24h 量 $1.04B）、NEAR 是 **$160k**（2026-09-23、24h 量 $892M），都比 river / lit 這種小幣厚兩個數量級。而且 NEAR 加入當下多空比就在 **2.93** —— 正好是上面說的「大盤穿越 2 太頻繁」本人。照同一條標準兩個都算大盤，放進來只會多噪音。
 
 UAI（2026-09-23 加入）則是這組裡最不需要解釋的一個：實測中價 ±0.1% 以內的掛單量 **$4.2k**，正好夾在 river（$2.5k）和 lab（$6.3k）中間，24h 量 $50M。而且跟 SOXL / CL 不一樣，它加入當下的多空比是 **0.95**、在門檻下方，所以第一次穿越就是真的穿越，不用先等它跌回 2 以下。
 
@@ -420,7 +421,7 @@ curl -H "x-internal-token: <PROXY_TOKEN>" \
 5. 從既有歷史補滿窗口，免得等 8 小時（一次一個 symbol，每個會補到 96 筆）：
 
 ```bash
-for s in river btc eth sol sui lit lab uai zec soxl cl; do
+for s in river btc eth sol sui near lit lab uai zec soxl cl; do
   curl -H "x-internal-token: <PROXY_TOKEN>" \
     "https://smart-money-collector.andychien-design.workers.dev/alerts/backfill?symbol=$s"
 done

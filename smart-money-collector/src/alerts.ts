@@ -85,10 +85,12 @@ const GATE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 // it belongs with the majors. It is in anyway, to be judged on its own firing
 // record — the first thing to check if the channel gets noisy.
 //
-// sui is tracked but deliberately left out: measured 2026-09-22 its book held
-// $230k within 0.1% of mid on $1.04B of 24h volume, two orders of magnitude
-// past the small caps and in SOL's league. It reads as a major here, so the
-// gate would only add noise.
+// sui and near are tracked but deliberately left out. Measured 2026-09-22,
+// sui's book held $230k within 0.1% of mid on $1.04B of 24h volume; measured
+// 2026-09-23, near's held $160k on $892M. Both are two orders of magnitude
+// past the small caps, and near was already sitting at 2.93 when it was added
+// — the majors-cross-2-too-often problem above, in one reading. They read as
+// majors here, so the gate would only add noise.
 //
 // uai is the plainest fit the set has had: measured 2026-09-23 its book held
 // $4.2k within 0.1% of mid, right between river ($2.5k) and lab ($6.3k), on
