@@ -89,7 +89,13 @@ const GATE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 // $230k within 0.1% of mid on $1.04B of 24h volume, two orders of magnitude
 // past the small caps and in SOL's league. It reads as a major here, so the
 // gate would only add noise.
-const GATE_SYMBOLS = new Set(["river", "lit", "lab", "soxl", "cl"]);
+//
+// uai is the plainest fit the set has had: measured 2026-09-23 its book held
+// $4.2k within 0.1% of mid, right between river ($2.5k) and lab ($6.3k), on
+// $50M of 24h volume. Unlike soxl and cl it also came in below the threshold
+// (0.95), so its first crossing is a real one rather than a wait for it to
+// fall back under 2 first.
+const GATE_SYMBOLS = new Set(["river", "lit", "lab", "uai", "soxl", "cl"]);
 
 // --- state ----------------------------------------------------------------
 // Compact on purpose: the whole object is parsed and re-serialised every cron
