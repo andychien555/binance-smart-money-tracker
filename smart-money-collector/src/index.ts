@@ -49,6 +49,7 @@ const SYMBOLS_META: SymbolMeta[] = [
 	{ symbol: "LITUSDT", short: "lit", label: "LIT/USDT" },
 	{ symbol: "LABUSDT", short: "lab", label: "LAB/USDT" },
 	{ symbol: "UAIUSDT", short: "uai", label: "UAI/USDT" },
+	{ symbol: "REZUSDT", short: "rez", label: "REZ/USDT" },
 	{ symbol: "ZECUSDT", short: "zec", label: "ZEC/USDT" },
 	// TradFi perp (contractType TRADIFI_PERPETUAL, underlyingType EQUITY), not a
 	// coin. Same API shape as the rest, so nothing here needs special-casing —
