@@ -32,22 +32,12 @@ type SymbolMeta = {
 type BtcRef = { lastPrice: string; priceChangePercent: string };
 
 const SYMBOLS_META: SymbolMeta[] = [
-	{
-		symbol: "RIVERUSDT",
-		short: "river",
-		label: "RIVER/USDT",
-		onchain: {
-			chain: "56",
-			addr: "0xda7ad9dea9397cffddae2f8a052b82f1484252b3",
-		},
-	},
 	{ symbol: "BTCUSDT", short: "btc", label: "BTC/USDT" },
 	{ symbol: "ETHUSDT", short: "eth", label: "ETH/USDT" },
 	{ symbol: "SOLUSDT", short: "sol", label: "SOL/USDT" },
 	{ symbol: "SUIUSDT", short: "sui", label: "SUI/USDT" },
 	{ symbol: "NEARUSDT", short: "near", label: "NEAR/USDT" },
 	{ symbol: "LITUSDT", short: "lit", label: "LIT/USDT" },
-	{ symbol: "LABUSDT", short: "lab", label: "LAB/USDT" },
 	{ symbol: "UAIUSDT", short: "uai", label: "UAI/USDT" },
 	{ symbol: "REZUSDT", short: "rez", label: "REZ/USDT" },
 	{ symbol: "TRBUSDT", short: "trb", label: "TRB/USDT" },

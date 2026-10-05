@@ -10,14 +10,12 @@
 
 | Symbol | CEX | 鏈上資料 |
 |---|---|---|
-| RIVER/USDT | ✅ | BSC |
 | BTC/USDT | ✅ | — |
 | ETH/USDT | ✅ | — |
 | SOL/USDT | ✅ | — |
 | SUI/USDT | ✅ | — |
 | NEAR/USDT | ✅ | — |
 | LIT/USDT | ✅ | — |
-| LAB/USDT | ✅ | — |
 | UAI/USDT | ✅ | — |
 | REZ/USDT | ✅ | — |
 | TRB/USDT | ✅ | — |
@@ -32,7 +30,9 @@ SOXL 和 CL 是清單裡僅有的兩個非幣標的，都是 Binance 的 TradFi 
 
 兩者共通的一點：每列都會帶的 BTC 參考價，對非幣標的的參考價值偏低。
 
-LAB 在 2026-09-07 ~ 09-12 停止追蹤過，那段的分片是事後用 [scripts/backfill-gap.mjs](smart-money-collector/scripts/backfill-gap.mjs) 重建的：有價格 / OI / 資金費率 / taker，但**沒有 `sm_*`**（smart money 端點只回「現在」，補不回來）。那幾列帶 `"backfilled": true`，細節見下方「補資料缺口」。
+RIVER 和 LAB 從 2026-10-05 起停止追蹤，R2 的歷史分片都留著。RIVER 是清單上唯一設了鏈上資料的 symbol（BSC，`chain: "56"`、`addr: "0xda7ad9dea9397cffddae2f8a052b82f1484252b3"`），加回來時要連 `onchain` 一起放回去。
+
+LAB 在 2026-09-07 ~ 09-12 也停止追蹤過，那段的分片是事後用 [scripts/backfill-gap.mjs](smart-money-collector/scripts/backfill-gap.mjs) 重建的：有價格 / OI / 資金費率 / taker，但**沒有 `sm_*`**（smart money 端點只回「現在」，補不回來）。那幾列帶 `"backfilled": true`，細節見下方「補資料缺口」。
 
 要加減 symbol 見下方「新增 symbol」。前端要不要顯示是另一回事，見「隱藏 / 顯示某個 symbol」。
 
@@ -58,7 +58,7 @@ LAB 在 2026-09-07 ~ 09-12 停止追蹤過，那段的分片是事後用 [script
 
 ### 3. Binance Web3 Wallet（鏈上代幣資訊）
 - `web3.binance.com/bapi/defi/v4/.../market/token/dynamic/info` — 持幣人數、Top 10 集中度、KOL 持有人、Smart Money 持有人、池子流動性
-- 只跑在有設定鏈上合約地址的 symbol（目前只有 RIVER）
+- 只跑在有設定鏈上合約地址的 symbol（目前沒有；唯一設過的 RIVER 已停止追蹤）
 
 完整欄位清單 → [smart-money-collector/src/index.ts](smart-money-collector/src/index.ts) 的 `row` 構造處。
 
@@ -360,7 +360,7 @@ node scripts/backfill-gap.mjs --symbol LABUSDT \
 
 #### 2. 水位訊號（gate）— 小幣多空比突破 2.0
 
-小幣的多空比站上 2 是值得動作的位置，**不管它是急拉上去還是慢慢磨上去的** —— 這是變化訊號抓不到的東西，所以獨立成一條規則。只看 `GATE_SYMBOLS`（river / lit / lab / uai / rez / trb / soxl / cl），不看 BTC/ETH/SOL：這訊號講的是小幣，而大盤穿越 2 太頻繁（BTC 有 29% 的時間在 2 以上）會把它淹掉。
+小幣的多空比站上 2 是值得動作的位置，**不管它是急拉上去還是慢慢磨上去的** —— 這是變化訊號抓不到的東西，所以獨立成一條規則。只看 `GATE_SYMBOLS`（lit / uai / rez / trb / soxl / cl），不看 BTC/ETH/SOL：這訊號講的是小幣，而大盤穿越 2 太頻繁（BTC 有 29% 的時間在 2 以上）會把它淹掉。
 
 兩個關鍵設計，都是被實際資料逼出來的：
 
@@ -427,7 +427,7 @@ curl -H "x-internal-token: <PROXY_TOKEN>" \
 5. 從既有歷史補滿窗口，免得等 8 小時（一次一個 symbol，每個會補到 96 筆）：
 
 ```bash
-for s in river btc eth sol sui near lit lab uai rez trb zec soxl cl; do
+for s in btc eth sol sui near lit uai rez trb zec soxl cl; do
   curl -H "x-internal-token: <PROXY_TOKEN>" \
     "https://smart-money-collector.andychien-design.workers.dev/alerts/backfill?symbol=$s"
 done

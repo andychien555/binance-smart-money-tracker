@@ -107,7 +107,7 @@ const GATE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 // 0.1% of mid next to lab's $9.0k, under lit ($21.9k) and far under near
 // ($238k), on $14.5M of 24h volume. It came in at 1.13, below the threshold,
 // so its first crossing is a real one.
-const GATE_SYMBOLS = new Set(["river", "lit", "lab", "uai", "rez", "trb", "soxl", "cl"]);
+const GATE_SYMBOLS = new Set(["lit", "uai", "rez", "trb", "soxl", "cl"]);
 
 // --- state ----------------------------------------------------------------
 // Compact on purpose: the whole object is parsed and re-serialised every cron
