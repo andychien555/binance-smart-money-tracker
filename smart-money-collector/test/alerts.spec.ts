@@ -353,6 +353,58 @@ describe("formatMessage", () => {
 		expect(msg.match(/SOL\/USDT/g)).toHaveLength(1);
 	});
 
+	function rec(over: Partial<AlertRecord>): AlertRecord {
+		return {
+			ts: TS,
+			symbol: "sol",
+			label: "SOL/USDT",
+			metric: "ls",
+			dir: "up",
+			from: 1,
+			to: 2,
+			pct: 0.5,
+			z: 4,
+			price: 1,
+			price_change_pct: -3,
+			...over,
+		};
+	}
+
+	it("marks by market bias, not by which way the number moved", () => {
+		// Shorts closing is bullish even though the metric went down.
+		const msg = formatMessage(
+			[rec({ metric: "short", dir: "down", from: 3, to: 2, pct: -0.33 })],
+			"https://example.test",
+		);
+		expect(msg).toContain("🐂 <b>SOL/USDT</b>");
+		expect(msg).not.toContain("🐻");
+	});
+
+	it("flags a symbol whose signals disagree and marks each line", () => {
+		const msg = formatMessage(
+			[
+				rec({ metric: "long", dir: "up", z: 5 }),
+				rec({ metric: "short", dir: "up", z: 4 }),
+			],
+			"https://example.test",
+		);
+		expect(msg).toContain("⚖️ <b>SOL/USDT</b>");
+		expect(msg).toContain("🐂 多單持倉");
+		expect(msg).toContain("🐻 空單持倉");
+	});
+
+	it("marks only the header when every signal agrees", () => {
+		const msg = formatMessage(
+			[
+				rec({ metric: "long", dir: "up", z: 5 }),
+				rec({ metric: "short", dir: "down", z: 4 }),
+			],
+			"https://example.test",
+		);
+		expect(msg.match(/🐂/g)).toHaveLength(1);
+		expect(msg).not.toContain("⚖️");
+	});
+
 	it("escapes HTML so a label cannot break the markup", () => {
 		const msg = formatMessage(
 			[

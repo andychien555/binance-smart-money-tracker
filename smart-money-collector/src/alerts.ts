@@ -414,6 +414,19 @@ const METRIC_LABEL: Record<Metric, string> = {
 	gate: `多空比突破 ${GATE_LEVEL}`,
 };
 
+// What a move means for the market, not which way the number went: short
+// notional rising is bearish, and a gate hit is a ratio breaking up through
+// GATE_LEVEL, so it is always bullish.
+type Bias = "bull" | "bear";
+
+function bias(r: AlertRecord): Bias {
+	if (r.metric === "gate") return "bull";
+	const up = r.dir === "up";
+	return (r.metric === "short" ? !up : up) ? "bull" : "bear";
+}
+
+const BIAS_ICON: Record<Bias, string> = { bull: "🐂", bear: "🐻" };
+
 function esc(s: string): string {
 	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -454,8 +467,11 @@ export function formatMessage(
 			return Math.abs(b.z) - Math.abs(a.z);
 		});
 		const head = rs[0];
+		// When a symbol's signals disagree, the header says so and each line
+		// carries its own bias, rather than letting the loudest one speak for all.
+		const mixed = new Set(rs.map(bias)).size > 1;
 		const icon =
-			head.metric === "gate" ? "🚨" : head.dir === "up" ? "📈" : "📉";
+			head.metric === "gate" ? "🚨" : mixed ? "⚖️" : BIAS_ICON[bias(head)];
 		const lines = [
 			`${icon} <b>${esc(head.label)}</b>  $${fmtPrice(head.price)}  ` +
 				`<code>${fmtPct(head.price_change_pct / 100)} 24h</code>`,
@@ -470,7 +486,10 @@ export function formatMessage(
 				r.metric === "gate"
 					? `+${(r.to - r.from).toFixed(3)}`
 					: `${fmtPct(r.pct)}, ${r.z.toFixed(1)}σ`;
-			lines.push(`   ${METRIC_LABEL[r.metric]} ${from} → ${to}  (${detail})`);
+			const mark = mixed ? `${BIAS_ICON[bias(r)]} ` : "";
+			lines.push(
+				`   ${mark}${METRIC_LABEL[r.metric]} ${from} → ${to}  (${detail})`,
+			);
 		}
 		blocks.push(lines.join("\n"));
 	}
