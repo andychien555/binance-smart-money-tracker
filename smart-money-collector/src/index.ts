@@ -38,7 +38,6 @@ const SYMBOLS_META: SymbolMeta[] = [
 	{ symbol: "SUIUSDT", short: "sui", label: "SUI/USDT" },
 	{ symbol: "NEARUSDT", short: "near", label: "NEAR/USDT" },
 	{ symbol: "LITUSDT", short: "lit", label: "LIT/USDT" },
-	{ symbol: "UAIUSDT", short: "uai", label: "UAI/USDT" },
 	// TradFi perp (contractType TRADIFI_PERPETUAL, underlyingType EQUITY), not a
 	// coin. Same API shape as the rest, so nothing here needs special-casing —
 	// but funding is 0 while US equities are closed, which is the venue being

@@ -91,13 +91,7 @@ const GATE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 // past the small caps, and near was already sitting at 2.93 when it was added
 // — the majors-cross-2-too-often problem above, in one reading. They read as
 // majors here, so the gate would only add noise.
-//
-// uai is the plainest fit the set has had: measured 2026-09-23 its book held
-// $4.2k within 0.1% of mid, right between river ($2.5k) and lab ($6.3k), on
-// $50M of 24h volume. Unlike soxl and cl it also came in below the threshold
-// (0.95), so its first crossing is a real one rather than a wait for it to
-// fall back under 2 first.
-const GATE_SYMBOLS = new Set(["lit", "uai", "soxl", "cl"]);
+const GATE_SYMBOLS = new Set(["lit", "soxl", "cl"]);
 
 // --- state ----------------------------------------------------------------
 // Compact on purpose: the whole object is parsed and re-serialised every cron
