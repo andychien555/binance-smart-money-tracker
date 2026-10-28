@@ -1,6 +1,6 @@
 # proxy — DigitalOcean 部署版
 
-ℹ️ proxy 原本跑在 Mac 上經 Cloudflare Tunnel 連回 Worker，2026-05-14 已遷到 DigitalOcean Singapore VPS；資料夾 2026-06-19 從 `mac-proxy/` 改名為 `proxy/`。**注意**：DO VPS 上的實際路徑仍是 `/root/.openclaw/workspace/mac-proxy/`（線上沒一起改），所以本文下方的 DO 操作絕對路徑維持 `mac-proxy`。
+ℹ️ proxy 原本跑在 Mac 上經 Cloudflare Tunnel 連回 Worker，2026-05-14 已遷到 DigitalOcean Singapore VPS；資料夾 2026-06-19 從 `mac-proxy/` 改名為 `proxy/`。DO VPS 上的路徑在 2026-10-28 也跟著改成 `/root/.openclaw/workspace/proxy/`（systemd unit 一併更新），DO 上的 clone 同步到 GitHub `main`。
 
 `proxy.mjs` 本身沒改，這份 README 的內容已全部替換成 DO 部署 / 操作 / debug 流程。
 
@@ -70,15 +70,15 @@ systemctl restart caddy                    # 比較嚴重才用
 
 ### 改 proxy.mjs
 
-DO 上有 repo 完整 clone，直接編輯：
+在 Mac 改、commit、push，DO 上 pull 下來再重啟：
 
 ```bash
-nano /root/.openclaw/workspace/mac-proxy/proxy.mjs
+cd /root/.openclaw/workspace && git pull --ff-only
 systemctl restart binance-proxy
 journalctl -u binance-proxy -n 5           # 確認啟動沒報錯
 ```
 
-⚠️ 同份檔案也要 commit 進 repo（Mac 那邊 `git add proxy.mjs && git commit && git push`），DO 跟 Mac 兩邊版本同步靠人工，沒有自動 sync。
+⚠️ 別直接在 DO 上改檔：clone 保持乾淨，`git pull --ff-only` 才不會卡住。重啟挑每個 15 分鐘週期的第 2–12 分鐘（UTC），避開 Worker cron 正在打 proxy 的時候。
 
 ### 改 Caddy 設定（例如加新 domain / 新 route）
 
@@ -97,7 +97,7 @@ curl http://127.0.0.1:8787/health
 curl https://167.172.64.49.nip.io/health
 
 # 帶 token 打 Binance ping
-curl -H "x-proxy-token: $(grep PROXY_SECRET /root/.openclaw/workspace/mac-proxy/.env | cut -d= -f2)" \
+curl -H "x-proxy-token: $(grep PROXY_SECRET /root/.openclaw/workspace/proxy/.env | cut -d= -f2)" \
   https://167.172.64.49.nip.io/host-fapi/fapi/v1/ping
 ```
 
@@ -191,8 +191,8 @@ Let's Encrypt 需要合法 domain。`nip.io` 是免費 wildcard DNS（`<IP>.nip.
 
 | 檔案 | 用途 | 位置 |
 |---|---|---|
-| `proxy.mjs` | Node HTTP proxy，listen on 127.0.0.1:8787 | repo + DO `/root/.openclaw/workspace/mac-proxy/` |
-| `.env` | `PROXY_SECRET`、`PORT` — gitignored，只在 DO 上 | DO `/root/.openclaw/workspace/mac-proxy/.env`（chmod 600） |
+| `proxy.mjs` | Node HTTP proxy，listen on 127.0.0.1:8787 | repo + DO `/root/.openclaw/workspace/proxy/` |
+| `.env` | `PROXY_SECRET`、`PORT` — gitignored，只在 DO 上 | DO `/root/.openclaw/workspace/proxy/.env`（chmod 600） |
 | `start.sh` / `stop.sh` | **舊版 Mac 用**，DO 上不使用（systemctl 取代） | repo only |
 | systemd unit | `binance-proxy.service` | DO `/etc/systemd/system/binance-proxy.service` |
 | Caddyfile | TLS / reverse proxy 設定 | DO `/etc/caddy/Caddyfile` |
@@ -203,3 +203,4 @@ Let's Encrypt 需要合法 domain。`nip.io` 是免費 wildcard DNS（`<IP>.nip.
 - 2026-05-13 ~04:45 UTC：Binance 開始 451 CF edge IP
 - 2026-05-13：上線 stopgap — Mac proxy + cloudflared quick tunnel（[commit 48672d9](https://github.com/andychien555/BN_Smart_Money_Tracker/commit/48672d9)）
 - 2026-05-14：遷到 DO Singapore，棄用 cloudflared，加 Caddy + systemd 跟 nip.io cert
+- 2026-10-28：DO 上 Node 20 → 22（NodeSource）；proxy.mjs 更新到 repo 版（補上 content-length 修正）；DO 路徑 `mac-proxy/` → `proxy/`，clone 同步到 `main`

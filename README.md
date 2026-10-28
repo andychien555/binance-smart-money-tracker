@@ -171,14 +171,14 @@ Cloudflare Workers Free plan 對 **每次** invocation（cron `scheduled` 與 `f
 │   ├── package.json
 │   └── tsconfig.json
 └── proxy/                              # proxy 原始碼（現役部署在 DO Singapore）
-    ├── proxy.mjs                       # Node HTTP proxy（同一份在 DO /root/.openclaw/workspace/mac-proxy/）
+    ├── proxy.mjs                       # Node HTTP proxy（同一份在 DO /root/.openclaw/workspace/proxy/）
     ├── start.sh / stop.sh              # 啟停腳本（DO 上用 systemctl 管）
     └── README.md                       # DO 部署 / 操作 / debug（必讀）
 ```
 
 `.github/workflows/collect.yml`（舊 GH Actions cron）已移除，被 Worker cron 取代。舊 Python collector 時代的遺物（`data/`、`scripts/`、`server/`）已於 2026-06-19 清掉，需要時從 git history 找得回。
 
-> proxy 資料夾原名 `mac-proxy/`（proxy 早期跑在 Mac 上），2026-06-19 改名為 `proxy/`。DO VPS 上的實際路徑仍是 `/root/.openclaw/workspace/mac-proxy/`（未動線上），故下方與 proxy README 中的 DO 操作絕對路徑維持原樣。
+> proxy 資料夾原名 `mac-proxy/`（proxy 早期跑在 Mac 上），2026-06-19 改名為 `proxy/`。DO VPS 上的路徑在 2026-10-28 也改成 `/root/.openclaw/workspace/proxy/`，兩邊一致。
 
 ---
 
@@ -448,7 +448,7 @@ done
 
 `/alerts` 系列都要 `x-internal-token: <PROXY_TOKEN>`：不擋的話任何人都能灌假資料進滾動窗口，或是拿你的 bot 洗版。
 
-`PROXY_TOKEN` 的值在本機 [proxy/.env](proxy/.env)（被 `proxy/.gitignore` 忽略，不在 repo 裡），DO 上則是 `/root/.openclaw/workspace/mac-proxy/.env` 的 `PROXY_SECRET`，兩者必須一致。取用時別讓它進到 shell history 或輸出：
+`PROXY_TOKEN` 的值在本機 [proxy/.env](proxy/.env)（被 `proxy/.gitignore` 忽略，不在 repo 裡），DO 上則是 `/root/.openclaw/workspace/proxy/.env` 的 `PROXY_SECRET`，兩者必須一致。取用時別讓它進到 shell history 或輸出：
 
 ```bash
 TOKEN=$(grep '^PROXY_SECRET=' proxy/.env | cut -d= -f2-)
