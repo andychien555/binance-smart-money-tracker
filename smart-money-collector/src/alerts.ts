@@ -97,17 +97,7 @@ const GATE_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 // $50M of 24h volume. Unlike soxl and cl it also came in below the threshold
 // (0.95), so its first crossing is a real one rather than a wait for it to
 // fall back under 2 first.
-//
-// rez is the thinnest book the set has had: measured 2026-09-23 it held $3.1k
-// within 0.1% of mid — under river ($4.8k) and uai ($4.0k) on the same pass —
-// on $6.3M of 24h volume, the smallest in the set. It came in at 1.23, below
-// the threshold like uai, so its first crossing is a real one too.
-//
-// trb sits with lab: measured 2026-09-25 in one pass, it held $9.2k within
-// 0.1% of mid next to lab's $9.0k, under lit ($21.9k) and far under near
-// ($238k), on $14.5M of 24h volume. It came in at 1.13, below the threshold,
-// so its first crossing is a real one.
-const GATE_SYMBOLS = new Set(["lit", "uai", "rez", "trb", "soxl", "cl"]);
+const GATE_SYMBOLS = new Set(["lit", "uai", "soxl", "cl"]);
 
 // --- state ----------------------------------------------------------------
 // Compact on purpose: the whole object is parsed and re-serialised every cron
