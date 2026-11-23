@@ -16,16 +16,10 @@
 | NEAR/USDT | ✅ | — |
 | LIT/USDT | ✅ | — |
 | SOXL/USDT | ✅ | — |
-| CL/USDT | ✅ | — |
 
-SOXL 和 CL 是清單裡僅有的兩個非幣標的，都是 Binance 的 TradFi 永續（`contractType: TRADIFI_PERPETUAL`）。收集端都不用特別處理，欄位形狀跟幣一模一樣，但讀數要換個眼光 —— 而且兩者要換的眼光還不一樣：
+SOXL 是清單裡唯一的非幣標的，是 Binance 的 TradFi 永續（`contractType: TRADIFI_PERPETUAL`、`underlyingType: EQUITY`，底層是 3x 半導體 ETF）。收集端不用特別處理，欄位形狀跟幣一模一樣，但讀數要換個眼光：**美股休市時資金費率會是 `0`**（實測 09-05 兩期與 09-07 00:00 都是 0，09-06 三期則是正常的 0.0002~0.0005），那是交易所照實反映，不是抓失敗。每列都會帶的 BTC 參考價，對它的參考價值也偏低。
 
-- **SOXL**（`underlyingType: EQUITY`，底層是 3x 半導體 ETF）：**美股休市時資金費率會是 `0`**（實測 09-05 兩期與 09-07 00:00 都是 0，09-06 三期則是正常的 0.0002~0.0005），那是交易所照實反映，不是抓失敗。
-- **CL**（`underlyingType: COMMODITY`，就是 WTI 原油）：CL 是 NYMEX 的 WTI 代號，Binance **沒有** `WTIUSDT`（另有 `BZUSDT` = 布蘭特原油）。它的資金費率**每 4 小時**結算一次而不是 8 小時，而且**只有週末歸零**（實測 09-05 00:00 ~ 09-06 20:00 UTC 全 0，對應 CME 原油週末休市），平日 24 小時都是活的。平日費率**長期為負**（到 2026-09-10 的 45 期全部落在 -0.0001 ~ -0.0023），那是這個市場的常態，不是值得解讀的訊號。
-
-兩者共通的一點：每列都會帶的 BTC 參考價，對非幣標的的參考價值偏低。
-
-SUI 從 2026-11-23 起停止追蹤，REZ、TRB、ZEC、UAI 從 2026-10-29 起停止追蹤，RIVER 和 LAB 從 2026-10-05 起停止追蹤，R2 的歷史分片都留著。RIVER 是清單上唯一設了鏈上資料的 symbol（BSC，`chain: "56"`、`addr: "0xda7ad9dea9397cffddae2f8a052b82f1484252b3"`），加回來時要連 `onchain` 一起放回去。
+SUI、CL 從 2026-11-23 起停止追蹤，REZ、TRB、ZEC、UAI 從 2026-10-29 起停止追蹤，RIVER 和 LAB 從 2026-10-05 起停止追蹤，R2 的歷史分片都留著。RIVER 是清單上唯一設了鏈上資料的 symbol（BSC，`chain: "56"`、`addr: "0xda7ad9dea9397cffddae2f8a052b82f1484252b3"`），加回來時要連 `onchain` 一起放回去。
 
 LAB 在 2026-09-07 ~ 09-12 也停止追蹤過，那段的分片是事後用 [scripts/backfill-gap.mjs](smart-money-collector/scripts/backfill-gap.mjs) 重建的：有價格 / OI / 資金費率 / taker，但**沒有 `sm_*`**（smart money 端點只回「現在」，補不回來）。那幾列帶 `"backfilled": true`，細節見下方「補資料缺口」。
 
@@ -67,7 +61,7 @@ LAB 在 2026-09-07 ~ 09-12 也停止追蹤過，那段的分片是事後用 [scr
 │                                                                │
 │    cron trigger: */15 * * * *                                  │
 │      └─ scheduled handler (orchestrator)                       │
-│            ├─ GET /collect?batch=N  ×7 (self service-binding)  │
+│            ├─ GET /collect?batch=N  ×6 (self service-binding)  │
 │            │     └─ fetch 3 binance hosts × 1 symbol           │
 │            │         (透過 DO proxy，見下) → R2                │
 │            ├─ write symbols.json / meta.json                   │
@@ -107,7 +101,7 @@ LAB 在 2026-09-07 ~ 09-12 也停止追蹤過，那段的分片是事後用 [scr
 - **DO proxy 中繼**：Binance 從 2026-05-13 起對 CF edge anycast IP 回 451，所以 Worker 不直接打 Binance，改走 DO Singapore 機房（IP 信譽乾淨、Binance 200）→ Caddy HTTPS → Node proxy → Binance。詳見 [proxy/README.md](proxy/README.md)
 - **每日 NDJSON 分片儲存**：每次 cron 只 append 一筆到當日 `<SYMBOL>/days/<YYYY-MM-DD>.ndjson`（純文字 append，不 parse 全量），歷史永久保留。前端依需要的時間區間決定要讀哪幾天的分片。設計理由見下方「Worker CPU 預算」。
 - **CORS / cache**：Worker `/data/*` 路由附 `Access-Control-Allow-Origin: *` 和 `Cache-Control: public, max-age=30`
-- **批次 fan-out**：CF Free plan 每次 invocation 上限 50 subrequests，一個 symbol 要 ~10-11 個，全部塞一次會爆。orchestrator 透過 self service-binding 把 symbol 分批各自打 `/collect?batch=N`，每批拿到全新的 subrequest 預算。`BATCH_SIZE = 1`，所以**批數 = symbol 數**（目前 7）—— 上面架構圖的 ×7 會隨追蹤清單增減而變。異動判斷（`POST /alerts`）同理獨立一個 invocation，見下方「異動通知」
+- **批次 fan-out**：CF Free plan 每次 invocation 上限 50 subrequests，一個 symbol 要 ~10-11 個，全部塞一次會爆。orchestrator 透過 self service-binding 把 symbol 分批各自打 `/collect?batch=N`，每批拿到全新的 subrequest 預算。`BATCH_SIZE = 1`，所以**批數 = symbol 數**（目前 6）—— 上面架構圖的 ×6 會隨追蹤清單增減而變。異動判斷（`POST /alerts`）同理獨立一個 invocation，見下方「異動通知」
 
 ### Worker CPU 預算（重要）
 
@@ -357,7 +351,7 @@ node scripts/backfill-gap.mjs --symbol LABUSDT \
 
 #### 2. 水位訊號（gate）— 小幣多空比突破 2.0
 
-小幣的多空比站上 2 是值得動作的位置，**不管它是急拉上去還是慢慢磨上去的** —— 這是變化訊號抓不到的東西，所以獨立成一條規則。只看 `GATE_SYMBOLS`（lit / soxl / cl），不看 BTC/ETH/SOL：這訊號講的是小幣，而大盤穿越 2 太頻繁（BTC 有 29% 的時間在 2 以上）會把它淹掉。
+小幣的多空比站上 2 是值得動作的位置，**不管它是急拉上去還是慢慢磨上去的** —— 這是變化訊號抓不到的東西，所以獨立成一條規則。只看 `GATE_SYMBOLS`（lit / soxl），不看 BTC/ETH/SOL：這訊號講的是小幣，而大盤穿越 2 太頻繁（BTC 有 29% 的時間在 2 以上）會把它淹掉。
 
 兩個關鍵設計，都是被實際資料逼出來的：
 
@@ -366,9 +360,7 @@ node scripts/backfill-gap.mjs --symbol LABUSDT \
 
 gate 有自己的 12 小時冷卻，且**不需要暖機、不受收集中斷影響**（只比對前後兩筆，跨越 2 就是跨越 2）—— 新加的 symbol 隔天就受保護。同一輪若 gate 命中，會跳過該 symbol 的多空比變化檢查，兩者講的是同一件事。
 
-SOXL 和 CL 是這組裡的兩個非幣標的，兩個在這裡都還沒有任何歷史。放進來的前提都是「TradFi 永續的盤口比較像小幣、不像大盤」—— 這是假設，不是實測。加入當下兩者的多空比都已經在門檻之上（SOXL 2.72、CL 4.65），所以第一次觸發都要等它先跌回 2 以下再穿上來。等它們各自累積出一段歷史後，值得回頭驗證這個假設。
-
-CL 這個假設拉得比較硬，而且是明知故放：2026-09-10 實測它中價 ±0.1% 以內的掛單量是 **$2.8M**，貼著 SOL 的 $3.8M，比 river（$2k）/ lit（$13k）高了三個數量級 —— 照上面那條「盤口薄」的標準，它其實該歸在大盤那邊。先放進來看它自己的觸發紀錄，如果通知開始變吵，這是第一個該回頭砍掉的。
+SOXL 是這組裡唯一的非幣標的，在這裡還沒有任何歷史。放進來的前提是「TradFi 永續的盤口比較像小幣、不像大盤」—— 這是假設，不是實測。加入當下它的多空比已經在門檻之上（2.72），所以第一次觸發要等它先跌回 2 以下再穿上來。等它累積出一段歷史後，值得回頭驗證這個假設。
 
 反過來，NEAR 有收集但**刻意不進 gate**：實測中價 ±0.1% 以內的掛單量是 **$160k**（2026-09-23、24h 量 $892M），比 river / lit 這種小幣厚兩個數量級。而且它加入當下多空比就在 **2.93** —— 正好是上面說的「大盤穿越 2 太頻繁」本人。照同一條標準它算大盤，放進來只會多噪音。
 
@@ -418,7 +410,7 @@ curl -H "x-internal-token: <PROXY_TOKEN>" \
 5. 從既有歷史補滿窗口，免得等 8 小時（一次一個 symbol，每個會補到 96 筆）：
 
 ```bash
-for s in btc eth sol near lit soxl cl; do
+for s in btc eth sol near lit soxl; do
   curl -H "x-internal-token: <PROXY_TOKEN>" \
     "https://smart-money-collector.andychien-design.workers.dev/alerts/backfill?symbol=$s"
 done
